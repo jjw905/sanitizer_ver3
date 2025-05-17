@@ -1,5 +1,5 @@
 # 실행 명령어
- - 모듈 설치(최초 1회 실행만 하면 됨.)
+ - 모듈 설치(최초 1회 실행)
 ```sh
 pip install -r requirements.txt
 ```
