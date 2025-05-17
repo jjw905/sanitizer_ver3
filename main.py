@@ -143,6 +143,7 @@ def start_sanitization():
         except Exception as e:
             log_text.insert(tk.END, f"[ERROR] 처리 중 오류 발생: {str(e)}\n")
 
+# PDF 내부 재귀 탐지 함수 수정
 def find_javascript_keys(obj, found=None, path=""):
     if found is None:
         found = []
@@ -151,6 +152,7 @@ def find_javascript_keys(obj, found=None, path=""):
         for k, v in obj.items():
             key_str = k if isinstance(k, str) else k.__repr__()
             full_path = f"{path}/{key_str}" if path else key_str
+            full_path = full_path.replace("//", "/")  # ✅ 슬래시 중복 제거
             if key_str in ["/JavaScript", "/JS", "/OpenAction", "/AA"]:
                 found.append(full_path)
             find_javascript_keys(v, found, full_path)
