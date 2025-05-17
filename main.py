@@ -9,6 +9,10 @@ from PyPDF2 import PdfReader, PdfWriter
 uploaded_files = []
 target_files = []
 
+# 공통 무해화 저장 경로
+output_dir = os.path.join("sample", "clear")
+os.makedirs(output_dir, exist_ok=True)  # 폴더 없으면 생성
+
 # ────────────── 지원 파일 확장자 ──────────────
 SUPPORTED_EXTENSIONS = [
     ".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm",
@@ -37,7 +41,7 @@ def remove_macro(file_path):
             os.remove(vba_path)
             removed = True
 
-    clean_file = f"{os.path.splitext(file_path)[0]}_clean{ext}"
+    clean_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}_clean{ext}")
     with zipfile.ZipFile(clean_file, 'w') as zip_out:
         for root, _, files in os.walk(temp_dir):
             for file in files:
@@ -80,16 +84,15 @@ def sanitize_pdf(file_path):
         names = writer._root_object["/Names"]
         if "/JavaScript" in names:
             names.pop("/JavaScript")
-    clean_file = f"{os.path.splitext(file_path)[0]}_clean.pdf"
+    clean_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}_clean.pdf")
     with open(clean_file, "wb") as f:
         writer.write(f)
     return clean_file, found_keys
 
 # HWP/한글 기반 문자열 제거
-
 def sanitize_hwp(file_path):
     ext = os.path.splitext(file_path)[1].lower()
-    clean_file = f"{os.path.splitext(file_path)[0]}_clean{ext}"
+    clean_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}_clean{ext}")
     removed_strings = []
     with open(file_path, "rb") as f:
         data = f.read()
@@ -101,41 +104,7 @@ def sanitize_hwp(file_path):
         f.write(data)
     return clean_file, removed_strings
 
-# 파일 업로드
-def upload_files():
-    files = filedialog.askopenfilenames(
-    filetypes=[("지원 문서 형식", "*.docx *.docm *.xlsx *.xlsm *.pptx *.pptm *.pdf *.hwp *.hwpx *.hwpml")]
-    )
-    for f in files:
-        if f not in uploaded_files:
-            uploaded_files.append(f)
-            left_listbox.insert(tk.END, os.path.basename(f))
-
-# → 버튼
-def move_to_target():
-    selected = left_listbox.curselection()
-    for i in selected[::-1]:
-        file = uploaded_files[i]
-        if file not in target_files:
-            target_files.append(file)
-            right_listbox.insert(tk.END, os.path.basename(file))
-    for i in selected[::-1]:
-        left_listbox.delete(i)
-        del uploaded_files[i]
-
-# ← 버튼 (선택 제거)
-def remove_from_target():
-    selected = right_listbox.curselection()
-    for i in selected[::-1]:
-        file = target_files[i]
-        uploaded_files.append(file)
-        left_listbox.insert(tk.END, os.path.basename(file))
-        right_listbox.delete(i)
-        del target_files[i]
-
 # 무해화 실행
-# 무해화 실행
-
 def start_sanitization():
     log_text.delete(1.0, tk.END)
     history_text.delete(1.0, tk.END)
@@ -172,6 +141,38 @@ def start_sanitization():
                 log_text.insert(tk.END, "[X] 지원되지 않는 파일 형식입니다\n")
         except Exception as e:
             log_text.insert(tk.END, f"[ERROR] 처리 중 오류 발생: {str(e)}\n")
+
+# 파일 업로드
+def upload_files():
+    files = filedialog.askopenfilenames(
+    filetypes=[("지원 문서 형식", "*.docx *.docm *.xlsx *.xlsm *.pptx *.pptm *.pdf *.hwp *.hwpx *.hwpml")]
+    )
+    for f in files:
+        if f not in uploaded_files:
+            uploaded_files.append(f)
+            left_listbox.insert(tk.END, os.path.basename(f))
+
+# → 버튼
+def move_to_target():
+    selected = left_listbox.curselection()
+    for i in selected[::-1]:
+        file = uploaded_files[i]
+        if file not in target_files:
+            target_files.append(file)
+            right_listbox.insert(tk.END, os.path.basename(file))
+    for i in selected[::-1]:
+        left_listbox.delete(i)
+        del uploaded_files[i]
+
+# ← 버튼 (선택 제거)
+def remove_from_target():
+    selected = right_listbox.curselection()
+    for i in selected[::-1]:
+        file = target_files[i]
+        uploaded_files.append(file)
+        left_listbox.insert(tk.END, os.path.basename(file))
+        right_listbox.delete(i)
+        del target_files[i]
 
 # ────────────── GUI 구성 ──────────────
 root = tk.Tk()
