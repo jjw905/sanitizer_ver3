@@ -1,4 +1,9 @@
 # 실행 명령어
+ - 모듈 설치(최초 1회 실행만 하면 됨.)
+```sh
+pip install -r requirements.txt
+```
+ - 프로그램 실행 명령어
 ```sh
 python main.py
 ```
@@ -24,10 +29,18 @@ python main.py
 
 # 파일 구조
 1. main.py
- - 메인 실행 파일
+ - 문서 무해화 GUI 애플리케이션의 진입점
 
-2. macro_remover.py
- - 
+2. utils/office_macro.py
+ - Office 문서(Word, Excel, PPT)의 매크로 제거 및 탐지
 
-3. pdf_with_js.py
- - JavaScript 악성코드 샘플 파일 생성 (실행방법: python pdf_with_js.py)
+3. utils/pdf_sanitizer.py
+ - PDF 문서 내 악성 JavaScript 탐지 및 제거
+
+4. utils/hwp_sanitizer.py
+ - .hwp, .hwpx, .hwpml 문서 내 위험 문자열 제거
+
+5. 기타 파일
+ - sample/mecro # mecro 악성코드 샘플
+ - sample/clear # 무해화 된 파일 저장 폴더
+ - requirements.txt # 의존성 모듈 목록
