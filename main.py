@@ -6,6 +6,9 @@ from tkinter import filedialog, messagebox
 from oletools.olevba import VBA_Parser
 from PyPDF2 import PdfReader, PdfWriter
 
+uploaded_files = []
+target_files = []
+
 # 매크로 탐지
 def is_macro_present(file_path):
     vbaparser = VBA_Parser(file_path)
@@ -43,7 +46,6 @@ def sanitize_pdf(file_path):
     for page in reader.pages:
         writer.add_page(page)
 
-    # /JavaScript, /OpenAction 제거
     writer._root_object.update({
         k: v for k, v in writer._root_object.items()
         if k not in ('/OpenAction', '/AA', '/JavaScript')
@@ -55,49 +57,84 @@ def sanitize_pdf(file_path):
 
     return clean_file
 
-# 파일 처리 로직
-def process_file():
-    file_path = filedialog.askopenfilename(
+# 파일 업로드
+def upload_files():
+    files = filedialog.askopenfilenames(
         filetypes=[("문서 파일", "*.docx *.docm *.pdf")]
     )
-    if not file_path:
-        return
+    for f in files:
+        if f not in uploaded_files:
+            uploaded_files.append(f)
+            left_listbox.insert(tk.END, os.path.basename(f))
 
-    ext = os.path.splitext(file_path)[1].lower()
+# → 버튼 동작
+def move_to_target():
+    selected = left_listbox.curselection()
+    for i in selected[::-1]:
+        file = uploaded_files[i]
+        if file not in target_files:
+            target_files.append(file)
+            right_listbox.insert(tk.END, os.path.basename(file))
+    for i in selected[::-1]:
+        left_listbox.delete(i)
+        del uploaded_files[i]
 
-    try:
-        if ext in (".docx", ".docm"):
-            log.insert(tk.END, f"[INFO] Word 문서 분석 중: {file_path}\n")
-            if is_macro_present(file_path):
-                clean_file = remove_macro(file_path)
-                log.insert(tk.END, f"[✔] 매크로 제거됨: {clean_file}\n")
+# 무해화 시작
+def start_sanitization():
+    log_text.delete(1.0, tk.END)
+
+    for file_path in target_files:
+        ext = os.path.splitext(file_path)[1].lower()
+        try:
+            if ext in (".docx", ".docm"):
+                log_text.insert(tk.END, f"[INFO] Word 분석: {file_path}\n")
+                if is_macro_present(file_path):
+                    clean_file = remove_macro(file_path)
+                    log_text.insert(tk.END, f"[✔] 매크로 제거됨: {clean_file}\n")
+                else:
+                    log_text.insert(tk.END, "[OK] 매크로 없음\n")
+            elif ext == ".pdf":
+                log_text.insert(tk.END, f"[INFO] PDF 분석: {file_path}\n")
+                clean_file = sanitize_pdf(file_path)
+                log_text.insert(tk.END, f"[✔] JavaScript 제거됨: {clean_file}\n")
             else:
-                log.insert(tk.END, "[OK] 매크로 없음. 무해화 불필요\n")
+                log_text.insert(tk.END, "[X] 지원되지 않는 형식\n")
+        except Exception as e:
+            log_text.insert(tk.END, f"[ERROR] {str(e)}\n")
 
-        elif ext == ".pdf":
-            log.insert(tk.END, f"[INFO] PDF 문서 분석 중: {file_path}\n")
-            clean_file = sanitize_pdf(file_path)
-            log.insert(tk.END, f"[✔] PDF JavaScript 제거됨: {clean_file}\n")
-
-        else:
-            log.insert(tk.END, "[X] 지원되지 않는 형식입니다.\n")
-
-    except Exception as e:
-        messagebox.showerror("에러 발생", str(e))
-
-# GUI 구성
+# ────────────── GUI 구성 ──────────────
 root = tk.Tk()
 root.title("문서형 악성코드 무해화 시스템")
-root.geometry("600x400")
+root.geometry("800x500")
 root.resizable(False, False)
 
-frame = tk.Frame(root, pady=20)
-frame.pack()
+# 좌측: 업로드된 파일 목록
+left_frame = tk.Frame(root)
+left_frame.grid(row=0, column=0, padx=10, pady=10)
+tk.Label(left_frame, text="📂 업로드된 문서").pack()
+left_listbox = tk.Listbox(left_frame, width=40, height=15)
+left_listbox.pack()
 
-btn = tk.Button(frame, text="문서 선택 및 무해화 시작", command=process_file, font=("Arial", 12))
-btn.pack(pady=10)
+# 중앙: 이동 버튼
+center_frame = tk.Frame(root)
+center_frame.grid(row=0, column=1, padx=10, pady=10)
+tk.Button(center_frame, text="→", width=5, command=move_to_target).pack(pady=60)
 
-log = tk.Text(root, height=15, width=70)
-log.pack(pady=10)
+# 우측: 무해화 대상
+right_frame = tk.Frame(root)
+right_frame.grid(row=0, column=2, padx=10, pady=10)
+tk.Label(right_frame, text="🛡 무해화 대상 문서").pack()
+right_listbox = tk.Listbox(right_frame, width=40, height=15)
+right_listbox.pack()
+
+# 하단: 버튼 + 로그 출력
+bottom_frame = tk.Frame(root)
+bottom_frame.grid(row=1, column=0, columnspan=3, pady=10)
+
+tk.Button(bottom_frame, text="문서 업로드", command=upload_files).grid(row=0, column=0, padx=10)
+tk.Button(bottom_frame, text="무해화 시작", command=start_sanitization).grid(row=0, column=1, padx=10)
+
+log_text = tk.Text(bottom_frame, height=10, width=95)
+log_text.grid(row=1, column=0, columnspan=2, pady=10)
 
 root.mainloop()
