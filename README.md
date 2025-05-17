@@ -1,9 +1,9 @@
-#실행 명령어
-'''sh
+# 실행 명령어
+```sh
 python main.py
-'''
+```
 
-#작동 순서
+# 작동 순서
 1. 문서 업로드
  - 사용자가 .pdf, .docx, .docm 선택
 
@@ -22,7 +22,7 @@ python main.py
 6. 무해화 결과 파일 저장
  - *_clean.pdf 또는 *_clean.docx 로 저장
 
-#파일 구조
+# 파일 구조
 1. main.py
  - 메인 실행 파일
 
