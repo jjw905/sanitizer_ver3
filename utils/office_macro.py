@@ -1,6 +1,11 @@
 import os
 import shutil
 import zipfile
+from oletools.olevba import VBA_Parser
+
+def is_macro_present(file_path: str) -> bool:
+    vbaparser = VBA_Parser(file_path)
+    return vbaparser.detect_vba_macros()
 
 def remove_macro(file_path: str, output_dir: str = "sample/clear") -> tuple[str, bool]:
     ext = os.path.splitext(file_path)[1].lower()
