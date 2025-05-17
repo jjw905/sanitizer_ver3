@@ -103,7 +103,9 @@ def sanitize_hwp(file_path):
 
 # 파일 업로드
 def upload_files():
-    files = filedialog.askopenfilenames(filetypes=[("문서 파일", "*.docx *.docm *.pdf")])
+    files = filedialog.askopenfilenames(
+    filetypes=[("지원 문서 형식", "*.docx *.docm *.xlsx *.xlsm *.pptx *.pptm *.pdf *.hwp *.hwpx *.hwpml")]
+    )
     for f in files:
         if f not in uploaded_files:
             uploaded_files.append(f)
