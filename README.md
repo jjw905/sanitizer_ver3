@@ -10,37 +10,37 @@ python main.py
 
 # 작동 순서
 1. 문서 업로드
- - 사용자가 .pdf, .docx, .docm 선택
+  - 사용자가 .pdf, .docx, .docm 선택
 
 2. 문서 구조 분석
- - PDF 구조 내 /JavaScript, /OpenAction 등 악성 키 탐색
+  - PDF 구조 내 /JavaScript, /OpenAction 등 악성 키 탐색
 
 3. 무해화 처리 (PDF)
- - PyPDF2로 문서 구조 읽고 위험 키 삭제 → 재저장
+  - PyPDF2로 문서 구조 읽고 위험 키 삭제 → 재저장
 
 4. 무해화 처리 (DOCX)
- - zip 구조의 vbaProject.bin 존재 여부 확인 → 삭제 후 재압축
+  - zip 구조의 vbaProject.bin 존재 여부 확인 → 삭제 후 재압축
 
 5. 로그 출력 + 히스토리 기록
- - 처리 결과를 시각화 → 어떤 키가 제거되었는지 기록
+  - 처리 결과를 시각화 → 어떤 키가 제거되었는지 기록
 
 6. 무해화 결과 파일 저장
- - *_clean.pdf 또는 *_clean.docx 로 저장
+  - *_clean.pdf 또는 *_clean.docx 로 저장
 
 # 파일 구조
 1. main.py
- - 문서 무해화 GUI 애플리케이션의 진입점
+  - 문서 무해화 GUI 애플리케이션의 진입점
 
 2. utils/office_macro.py
- - Office 문서(Word, Excel, PPT)의 매크로 제거 및 탐지
+  - Office 문서(Word, Excel, PPT)의 매크로 제거 및 탐지
 
 3. utils/pdf_sanitizer.py
- - PDF 문서 내 악성 JavaScript 탐지 및 제거
+  - PDF 문서 내 악성 JavaScript 탐지 및 제거
 
 4. utils/hwp_sanitizer.py
- - .hwp, .hwpx, .hwpml 문서 내 위험 문자열 제거
+  - .hwp, .hwpx, .hwpml 문서 내 위험 문자열 제거
 
 5. 기타 파일
- - sample/mecro # mecro 악성코드 샘플
- - sample/clear # 무해화 된 파일 저장 폴더
- - requirements.txt # 의존성 모듈 목록
+  - sample/mecro # mecro 악성코드 샘플
+  - sample/clear # 무해화 된 파일 저장 폴더
+  - requirements.txt # 의존성 모듈 목록
