@@ -1,2 +1,8 @@
 oletools
 PyPDF2
+scikit-learn
+pandas
+numpy
+requests
+python-dotenv
+pyzipper
