@@ -1,52 +1,241 @@
-# 샘플 파일들 (악성코드 포함이므로 Git에 업로드 금지)
-sample/clear/
+# =============================================================================
+# 문서형 악성코드 무해화 시스템 - .gitignore
+# =============================================================================
+
+# 🔐 보안 관련 파일들 (절대 커밋하면 안됨!)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+api_keys.txt
+secrets.txt
+credentials.json
+config.json
+
+# 🦠 악성코드 샘플 폴더들 (보안상 로컬에만 보관)
 sample/mecro/
 sample/mecro_backup/
+sample/clear/
+data/malware/
+data/clean/
+malware_samples/
+clean_samples/
 
-# Python 캐시 파일들
-utils/__pycache__/
-__pycache__/
-*.pycㅈ
-*.pyo
-*.pyd
-
-# 훈련된 모델 파일들 (용량이 크므로 제외)
+# 🧠 AI 모델 파일들 (용량이 크므로 제외)
 models/
 *.pkl
 *.joblib
+*.h5
+*.model
+*.sav
+*.dump
 
-# 환경 설정 파일 (API 키 포함이므로 보안상 제외)
-.env
+# 🐍 Python 관련 파일들
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# IDE 설정 파일들
+# 🔧 개발 도구 및 IDE 설정
 .vscode/
 .idea/workspace.xml
 .idea/tasks.xml
+.idea/usage.statistics.xml
 .idea/dictionaries/
 .idea/shelf/
+.idea/dataSources/
+.idea/dataSources.local.xml
+.idea/sqlDataSources.xml
+.idea/dynamic.xml
+.idea/uiDesigner.xml
+.idea/gradle.xml
+.idea/libraries
+.idea/mongoSettings.xml
+.idea/httpRequests/
+*.swp
+*.swo
+*~
 
-# 로그 파일들
+# 📊 데이터 및 로그 파일들
 *.log
+*.logs
 logs/
+log/
+*.csv
+*.xlsx
+*.json
+data/
+temp/
+tmp/
+cache/
 
-# 임시 파일들
+# 🗜️ 임시 및 압축 파일들
 temp_unzip/
 *.tmp
 *.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
 
-# OS 관련 파일들
+# 🖥️ 운영 체제 관련 파일들
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# 테스트 관련
+# 🧪 테스트 관련 파일들
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
 htmlcov/
+.tox/
+.nox/
+.cache
+pytest_cache/
 
-# 가상환경
+# 🌐 가상 환경
 venv/
 env/
+ENV/
 .venv/
+.env/
+.ENV/
+env.bak/
+venv.bak/
+pyvenv.cfg
 
-# 중복 프로젝트 폴더 (있다면 제외)
-sanitizer_ver3/
+# 📦 패키지 관리자 파일들
+pip-log.txt
+pip-delete-this-directory.txt
+.pip-cache/
+
+# 🎯 Jupyter Notebook
+.ipynb_checkpoints
+
+# 📱 모바일 관련
+*.apk
+*.ipa
+
+# 🔒 암호화 및 인증서 파일들
+*.crt
+*.csr
+*.der
+*.p7b
+*.p7c
+*.p7m
+*.p7s
+*.keystore
+*.jks
+
+# 🏗️ 빌드 관련
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+build/
+dist/
+*.egg-info/
+
+# 📋 문서 작업 파일들
+*.docx~
+*.xlsx~
+*.pptx~
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# 🌍 국제화 관련
+*.mo
+*.pot
+
+# 🎨 미디어 파일들 (용량 관리)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.mp3
+*.wav
+*.flac
+
+# 🚀 배포 관련
+*.tar.gz
+*.deb
+*.rpm
+*.dmg
+*.pkg
+*.msi
+
+# 💾 데이터베이스 파일들
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# 📊 분석 도구 결과
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 🔄 버전 관리 임시 파일들
+*.orig
+*.rej
+*.patch
+
+# =============================================================================
+# 프로젝트별 특수 설정
+# =============================================================================
+
+# 중복 프로젝트 폴더들
+sanitizer_ver*/
+doc_sanitizer_backup/
+old_version/
+
+# 테스트용 샘플 파일들
+test_samples/
+sample_downloads/
+downloaded_samples/
+
+# 설정 백업 파일들
+config_backup/
+settings_backup/
+*.conf.bak
+
+# API 응답 캐시
+api_cache/
+response_cache/
+*.cache
