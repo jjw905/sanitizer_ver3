@@ -6,7 +6,7 @@ sample/mecro_backup/
 # Python 캐시 파일들
 utils/__pycache__/
 __pycache__/
-*.pyc
+*.pycㅈ
 *.pyo
 *.pyd
 

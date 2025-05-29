@@ -1,19 +1,18 @@
-# 신규추가 파일
-# .env 파일에서 기입한 API 키 호출 기능
+# config.py - 수정된 버전
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
 API_KEYS = {
-    'malwarebazaar': os.getenv('MALWAREBAZAAR_AUTH_KEY'),
+    'malwarebazaar': os.getenv('MALWARE_BAZAAR_API_KEY'),  # 수정됨
     'virustotal': os.getenv('VIRUSTOTAL_API_KEY'),
 }
 
 API_ENDPOINTS = {
     'malwarebazaar_api': 'https://mb-api.abuse.ch/api/v1/',
-    'virustotal_scan': 'https://www.virustotal.com/vtapi/v2/file/scan',
-    'virustotal_report': 'https://www.virustotal.com/vtapi/v2/file/report'
+    'virustotal_scan': 'https://www.virustotal.com/api/v3/files',  # v3로 업데이트
+    'virustotal_report': 'https://www.virustotal.com/api/v3/files'
 }
 
 # 샘플 수집 설정
