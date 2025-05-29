@@ -1,13 +1,52 @@
-sample/clear
-utils/__pycache__
+# 샘플 파일들 (악성코드 포함이므로 Git에 업로드 금지)
+sample/clear/
+sample/mecro/
+sample/mecro_backup/
 
-# 신규추가
-.env
-*.key
-api_keys.txt
+# Python 캐시 파일들
+utils/__pycache__/
 __pycache__/
 *.pyc
-models/*.pkl
-data/malware/*
-data/clean/*
+*.pyo
+*.pyd
+
+# 훈련된 모델 파일들 (용량이 크므로 제외)
+models/
+*.pkl
+*.joblib
+
+# 환경 설정 파일 (API 키 포함이므로 보안상 제외)
+.env
+
+# IDE 설정 파일들
+.vscode/
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/dictionaries/
+.idea/shelf/
+
+# 로그 파일들
 *.log
+logs/
+
+# 임시 파일들
+temp_unzip/
+*.tmp
+*.temp
+
+# OS 관련 파일들
+.DS_Store
+Thumbs.db
+
+# 테스트 관련
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 가상환경
+venv/
+env/
+.venv/
+
+# 중복 프로젝트 폴더 (있다면 제외)
+sanitizer_ver3/
