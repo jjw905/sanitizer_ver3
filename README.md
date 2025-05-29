@@ -1,82 +1,128 @@
-# 실행 명령어
- - 모듈 설치(최초 1회 실행)
-```sh
+# 문서형 악성코드 무해화 시스템 v2.0 🛡️
+
+AI 기반 문서 악성코드 탐지 및 무해화 시스템
+
+## 🚀 빠른 시작
+
+### 1. 환경 설정
+```bash
+# 의존성 설치
 pip install -r requirements.txt
+
+# API 키 설정
+cp .env.example .env
+# .env 파일을 열어서 실제 API 키로 교체
 ```
- - 프로그램 실행 명령어
-```sh
+
+### 2. API 키 발급
+- **MalwareBazaar**: https://bazaar.abuse.ch/api/
+- **VirusTotal**: https://www.virustotal.com/gui/my-apikey
+
+### 3. 시스템 초기화
+```bash
+# 자동 설정 (데이터 수집 + 모델 훈련)
+python test_api.py setup
+
+# 또는 GUI만 실행 (기본 기능만)
 python main.py
 ```
 
-# 작동 순서
-1. 문서 업로드
-  - 사용자가 .pdf, .docx, .docm 선택
+## 📁 주요 기능
 
-2. 문서 구조 분석
-  - PDF 구조 내 /JavaScript, /OpenAction 등 악성 키 탐색
+### 🤖 AI 기반 탐지
+- 머신러닝 앙상블 모델
+- 실시간 악성코드 예측
+- 신뢰도 기반 위험도 평가
 
-3. 무해화 처리 (PDF)
-  - PyPDF2로 문서 구조 읽고 위험 키 삭제 → 재저장
+### 🔍 룰 기반 탐지
+- PDF JavaScript 탐지
+- Office 매크로 탐지
+- HWP 스크립트 탐지
 
-4. 무해화 처리 (DOCX)
-  - zip 구조의 vbaProject.bin 존재 여부 확인 → 삭제 후 재압축
+### 🛡️ 무해화 처리
+- 악성 요소 자동 제거
+- 안전한 문서로 변환
+- 처리 내역 상세 로깅
 
-5. 로그 출력 + 히스토리 기록
-  - 처리 결과를 시각화 → 어떤 키가 제거되었는지 기록
+## 📂 파일 구조
 
-6. 무해화 결과 파일 저장
-  - *_clean.pdf 또는 *_clean.docx 로 저장
+```
+doc_sanitizer/
+├── main.py                 # GUI 메인 애플리케이션
+├── test_api.py            # 시스템 테스트 및 설정
+├── config.py              # API 설정 관리
+├── utils/
+│   ├── api_client.py      # MalwareBazaar/VirusTotal API
+│   ├── model_trainer.py   # AI 모델 훈련
+│   ├── model_manager.py   # 모델 관리
+│   ├── feature_extractor.py # 특징 추출
+│   ├── pdf_sanitizer.py   # PDF 무해화
+│   ├── office_macro.py    # Office 매크로 처리
+│   └── hwp_sanitizer.py   # HWP 처리
+├── sample/
+│   ├── mecro/             # 악성 샘플 (로컬만)
+│   └── clear/             # 정상/정리된 파일
+└── models/                # 훈련된 AI 모델
+```
 
-# 파일 구조
-1. main.py
-  - 문서 무해화 GUI 애플리케이션의 진입점
+## 🔧 개발 도구
 
-2. utils/office_macro.py
-  - Office 문서(Word, Excel, PPT)의 매크로 제거 및 탐지
+### 모델 재훈련
+```bash
+python force_retrain.py
+```
 
-3. utils/pdf_sanitizer.py
-  - PDF 문서 내 악성 JavaScript 탐지 및 제거
+### 디버깅
+```bash
+python debug_env.py        # 환경변수 확인
+python test_api.py test    # 빠른 기능 테스트
+```
 
-4. utils/hwp_sanitizer.py
-  - .hwp, .hwpx, .hwpml 문서 내 위험 문자열 제거
+## ⚠️ 보안 주의사항
 
-5. 기타 파일
-  - sample/mecro - mecro 악성코드 샘플
-  - sample/clear - 무해화 된 파일 저장 폴더
-  - requirements.txt - 의존성 모듈 목록
+1. **API 키 보호**: `.env` 파일을 Git에 커밋하지 마세요
+2. **악성 샘플**: `sample/mecro/` 폴더는 로컬에만 존재
+3. **모델 파일**: 용량이 커서 Git에서 제외됨
 
-# 필수 설치 파일
-  - python 3.11.x 이상
-  - git
-  - sourcetree
-  - visual studio code / cursor ai (둘 중 하나)
+## 🤝 Git 워크플로우
 
-# Sourcetree 설치
- 1. https://www.sourcetreeapp.com/ 접속 후 Sourcetree 다운로드
- 2. installer에서 첫 화면(비트버킷 로그인) 건너뛰기
- 3. Mercurial 선택 해제 후 다음
- 4. Preferences에서 github 이메일 주소 입력 후 다음
- 5. SSH 인증 메시지 출력 시 "아니오" 선택
+### 브랜치 전략
+```bash
+# 개인 브랜치 생성
+git checkout -b dev.your_name
 
-# 프로젝트 다운로드(클론) 및 git 사용법
+# 작업 후 커밋
+git add .
+git commit -m "작업 내용"
+git push origin dev.your_name
+```
 
- 1 프로젝트 다운로드(클론)
-  - sourcetree 상단에 clone 버튼 클릭
-  - 소스경로(https://github.com/bgeun31/doc_sanitizer), 목적지 경로(탐색 누르고 본인이 원하는 저장할 폴더 선택) 입력
-  - 클론(clone) 클릭
-  - 저장할 폴더에 정상적으로 프로젝트 파일들이 다운됐는지 확인
+### 팀원과 동기화
+```bash
+# 작업 시작 전
+git pull origin dev
 
- 2. git branch 생성 (최초 1회만 진행)
-  - 상단에 브랜치 클릭
-  - 새 브랜치 항목에 본인이 작업할 공간의 이름을 입력 후 브랜치 생성 클릭 (ex. dev.song)
-  - 왼쪽 사이드바에 본인 브랜치에 점이 있는지 확인(현재 브랜치 확인)
-  - 이후 다시 클론할 경우 왼쪽 사이드바에 원격-origin-본인 브랜치 순으로 클릭해서 이동하면 됨.
+# 충돌 해결 후
+git merge dev
+```
 
- 3. git commit, pull, push 사용법
-  - 본인이 코드를 수정하거나 작업하면 왼쪽 사이드바 '파일 상태'에 변경된 파일 목록이 뜸.
-  - commit할 파일들을 올리고 하단 창에 본인이 작업한 내용을 작성하고 커밋을 하면 됨.
-  - 작업하는 동안 commit을 진행하고 작업이 완료되면 상단에 push를 누르고 본인 브랜치만 체크한 후 Push 진행.
-  - Github 본인 브랜치에 작업한 내용이 잘 올라갔는지 확인.
+## 📊 지원 파일 형식
 
-  - 작업을 시작하기 전 pull을 통해 팀원들이 작업한 결과물을 불러온 후 작업을 진행해야 함.
-  - 상단에 pull 버튼을 눌러서 '가져오기 위한 원격 브랜치' 탭에서 dev 브랜치를 선택하고 pull 진행.
+- **PDF**: `.pdf`
+- **Microsoft Office**: `.docx`, `.docm`, `.xlsx`, `.xlsm`, `.pptx`, `.pptm`
+- **한글 문서**: `.hwp`, `.hwpx`, `.hwpml`
+
+## 🏆 주요 특징
+
+- ✅ **AI + 룰 기반** 하이브리드 탐지
+- ✅ **실시간 처리** 및 진행률 표시
+- ✅ **배치 처리** 다중 파일 동시 처리
+- ✅ **상세 로그** 탐지/제거 내역 추적
+- ✅ **안전한 무해화** 원본 보존
+
+## 📞 문의사항
+
+프로젝트 관련 문의는 GitHub Issues를 이용해주세요.
+
+---
+**⚠️ 이 도구는 보안 연구 목적으로만 사용하세요.**
