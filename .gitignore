@@ -1,2 +1,13 @@
 sample/clear
 utils/__pycache__
+
+# 신규추가
+.env
+*.key
+api_keys.txt
+__pycache__/
+*.pyc
+models/*.pkl
+data/malware/*
+data/clean/*
+*.log
