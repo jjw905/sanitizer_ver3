@@ -1,22 +1,28 @@
+# test_api.py - 향상된 진행률 추적 시스템 적용 버전
+
 import os
 import sys
 from dotenv import load_dotenv
-from utils.api_client import APIClient, collect_training_data
+from utils.api_client import APIClient, collect_training_data, RealTimeProgressTracker
 from utils.model_manager import ModelManager
 from utils.model_trainer import train_model
 
 
-class ProgressTracker:
-    def __init__(self, total_steps):
+class SystemSetupProgressTracker:
+    """시스템 설정 전용 진행률 추적"""
+
+    def __init__(self, total_steps: int):
         self.total_steps = total_steps
         self.current_step = 0
+        self.step_descriptions = []
 
-    def update(self, message=""):
+    def update(self, message: str = ""):
+        """단계별 진행률 업데이트"""
         self.current_step += 1
         percentage = (self.current_step / self.total_steps) * 100
         bar_length = 40
         filled_length = int(bar_length * self.current_step // self.total_steps)
-        bar = '█' * filled_length + '-' * (bar_length - filled_length)
+        bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
         sys.stdout.write(f'\r[{bar}] {percentage:.1f}% - {message}')
         sys.stdout.flush()
@@ -46,8 +52,8 @@ def test_system():
     else:
         print("  ✗ MalwareBazaar API 키 없음")
 
-    # Triage API 테스트 (VirusTotal 대신)
-    if api_client.triage_key:
+    # Triage API 테스트
+    if hasattr(api_client, 'triage_key') and api_client.triage_key:
         print("  ✔ Triage API 키 설정됨")
         if api_client.test_triage_connection():
             print("  ✔ Triage API 연결 성공")
@@ -92,7 +98,7 @@ def test_system():
 
     return {
         'api_available': bool(api_client.malware_bazaar_key),
-        'triage_available': bool(api_client.triage_key),
+        'triage_available': bool(hasattr(api_client, 'triage_key') and api_client.triage_key),
         'model_available': model_manager.is_model_available(),
         'data_sufficient': data_status['sufficient_data'],
         'data_status': data_status
@@ -100,8 +106,8 @@ def test_system():
 
 
 def setup_system_with_progress():
-    """진행률 표시가 있는 시스템 초기 설정"""
-    print("=== 시스템 초기 설정 ===")
+    """향상된 진행률 표시가 있는 시스템 초기 설정"""
+    print("=== 시스템 초기 설정 (향상된 진행률 추적) ===")
 
     # 1단계: 시스템 테스트
     print("\n🔍 시스템 상태 확인 중...")
@@ -120,15 +126,15 @@ def setup_system_with_progress():
     # 전체 진행 단계 계산
     total_steps = 1  # 기본 체크
     if not test_results['data_sufficient']:
-        total_steps += 2  # 데이터 수집 (악성 + 정상)
+        total_steps += 1  # 데이터 수집 (새로운 시스템은 악성+정상을 통합 처리)
     if not test_results['model_available']:
         total_steps += 3  # 모델 훈련 (전처리 + 훈련 + 저장)
 
-    progress = ProgressTracker(total_steps)
+    progress = SystemSetupProgressTracker(total_steps)
 
     print(f"\n🚀 총 {total_steps}단계 작업을 시작합니다...\n")
 
-    # 2단계: 데이터 수집
+    # 2단계: 데이터 수집 (향상된 진행률 추적 적용)
     if not test_results['data_sufficient']:
         print(f"⚠️  훈련 데이터가 부족합니다!")
         print(f"현재: 악성 {test_results['data_status']['malware_samples']}개, "
@@ -140,16 +146,10 @@ def setup_system_with_progress():
             return False
 
         try:
-            print("\n📥 데이터 수집 시작...")
+            progress.update("훈련 데이터 수집 중 (향상된 진행률 추적 적용)...")
 
-            # 악성 샘플 수집
-            progress.update("악성 샘플 수집 중 (MalwareBazaar + Triage)...")
-            client = APIClient()
-            malware_files = client.download_malware_samples(300)
-
-            # 정상 샘플 생성
-            progress.update("정상 샘플 생성 중...")
-            clean_files = client.get_clean_samples(300)
+            # 새로운 향상된 진행률 추적 시스템으로 데이터 수집
+            malware_files, clean_files = collect_training_data(malware_count=300, clean_count=300)
 
             print(f"\n✅ 데이터 수집 완료: 악성 {len(malware_files)}개, 정상 {len(clean_files)}개")
 
@@ -202,7 +202,7 @@ def setup_system_with_progress():
 
 
 def setup_system():
-    """기본 시스템 설정 (진행률 없음)"""
+    """기본 시스템 설정 (향상된 진행률 추적 적용)"""
     return setup_system_with_progress()
 
 
