@@ -172,140 +172,197 @@ def scan_for_threats():
 
 
 def ai_scan_threats():
-    """악성코드 검사 (AI + 룰 기반 + VirusTotal 통합)"""
+    """AI 모델 + 룰 기반 + VirusTotal 통합 탐지"""
     if not target_files:
-        messagebox.showwarning("경고", "먼저 검사할 파일을 선택하세요.")
+        messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
         return
 
+    log_text.delete(1.0, tk.END)
+    history_text.delete(1.0, tk.END)
+
+    # 프로그레스 바 표시
     progress_window = tk.Toplevel(root)
-    progress_window.title("악성코드 검사 중...")
-    progress_window.geometry("400x100")
+    progress_window.title("통합 악성코드 탐지 진행 중...")
+    progress_window.geometry("400x120")
     progress_window.resizable(False, False)
 
-    progress_label = tk.Label(progress_window, text="악성코드를 검사하고 있습니다...")
+    progress_label = tk.Label(progress_window, text="AI + 룰 기반 + VirusTotal 통합 스캔 중...")
     progress_label.pack(pady=10)
 
     progress_bar = ttk.Progressbar(progress_window, mode='indeterminate')
     progress_bar.pack(pady=10, padx=20, fill='x')
     progress_bar.start()
 
+    # VirusTotal API 클라이언트
+    try:
+        from utils.api_client import APIClient
+        api_client = APIClient()
+        virustotal_available = bool(api_client.virustotal_key)
+    except:
+        virustotal_available = False
+
     def scan_thread():
         try:
-            log_append("=== 악성코드 검사 시작 ===")
+            log_text.insert(tk.END, "=== 통합 악성코드 탐지 시작 ===\n")
+            if virustotal_available:
+                log_text.insert(tk.END, "✅ VirusTotal API 활성화됨\n")
+            else:
+                log_text.insert(tk.END, "⚠️ VirusTotal API 비활성화 (의심 파일만 AI+룰 기반 검사)\n")
+            log_text.insert(tk.END, "=" * 50 + "\n")
+
+            suspicious_files = []  # VirusTotal 재검증 대상
 
             for i, file_path in enumerate(target_files):
                 file_name = os.path.basename(file_path)
-                log_append(f"[{i + 1}/{len(target_files)}] 검사 중: {file_name}")
+                log_text.insert(tk.END, f"\n[{i + 1}/{len(target_files)}] 1차 분석: {file_name}\n")
+                root.update()
 
-                # 1단계: 룰 기반 탐지
-                ext = os.path.splitext(file_path)[1].lower()
+                is_suspicious = False
+                ai_result = None
                 rule_threats = []
+
+                # === 1단계: AI 모델 예측 ===
+                if model_manager.is_model_available() and model_manager.load_model():
+                    ai_result = model_manager.predict_file(file_path)
+
+                    if "error" not in ai_result:
+                        prediction = ai_result['prediction']
+                        confidence = ai_result['confidence']
+                        malware_prob = ai_result.get('malware_probability', 0)
+
+                        log_text.insert(tk.END, f"[AI] 예측: {prediction} (신뢰도: {confidence:.3f})\n")
+
+                        if prediction == "악성":
+                            is_suspicious = True
+                            log_text.insert(tk.END, f"      └ 악성 확률: {malware_prob:.3f}\n")
+                    else:
+                        log_text.insert(tk.END, f"[AI] 오류: {ai_result['error']}\n")
+
+                # === 2단계: 룰 기반 탐지 ===
+                ext = os.path.splitext(file_path)[1].lower()
 
                 try:
                     if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
                         if is_macro_present(file_path):
-                            rule_threats.append("매크로")
+                            rule_threats.append("매크로 탐지")
+                            is_suspicious = True
+
                     elif ext == ".pdf":
                         reader = PdfReader(file_path)
                         root_obj = reader.trailer.get("/Root", {})
                         if isinstance(root_obj, IndirectObject):
                             root_obj = root_obj.get_object()
+
                         found_keys = find_javascript_keys(root_obj)
                         if found_keys:
                             rule_threats.extend(found_keys)
+                            is_suspicious = True
+
                     elif ext in (".hwp", ".hwpx", ".hwpml"):
                         with open(file_path, "rb") as f:
                             data = f.read()
                         for pattern in [b'Shell', b'cmd', b'urlmon', b'http', b'javascript']:
                             if pattern in data:
                                 rule_threats.append(pattern.decode())
-                except:
-                    pass
+                                is_suspicious = True
 
-                # 2단계: AI 모델 검사
-                ai_prediction = "정상"
-                ai_confidence = 0
-                ai_detected = False
-
-                if model_manager.is_model_available():
-                    result = model_manager.predict_file(file_path)
-                    if "error" not in result:
-                        ai_prediction = result['prediction']
-                        ai_confidence = result['confidence']
-                        ai_detected = (ai_prediction == "악성")
-
-                # 3단계: VirusTotal 검사
-                vt_verdict = "알 수 없음"
-                vt_detected = False
-
-                if virustotal_checker.is_available():
-                    vt_result = virustotal_checker.comprehensive_check(file_path)
-                    vt_verdict = vt_result.get('verdict', '알 수 없음')
-                    vt_detected = (vt_verdict in ['악성', '의심'])
-
-                # 종합 판정
-                is_malicious = bool(rule_threats or ai_detected or vt_detected)
-
-                if is_malicious:
-                    # 악성으로 판정된 경우 - 유형 분류
-                    malware_type = classify_malware_type(file_path)
-
-                    # "정상으로 추정" 결과가 나오면 다른 방법으로 유형 결정
-                    if "정상" in malware_type:
-                        if ext == ".pdf" and any(
-                                "/javascript" in str(threat).lower() or "/js" in str(threat).lower() for threat in
-                                rule_threats):
-                            malware_type = "PDF Exploit"
-                        elif ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm") and "매크로" in rule_threats:
-                            malware_type = "Macro Dropper"
-                        elif ext in (".hwp", ".hwpx", ".hwpml"):
-                            malware_type = "HWP Exploit"
-                        elif any(keyword in file_name.lower() for keyword in ['invoice', 'payment', 'statement']):
-                            malware_type = "Email Trojan"
-                        else:
-                            malware_type = "알 수 없는 악성코드"
-
-                    log_append(f"[🚨 위험] 악성코드 탐지 - {malware_type}")
-
-                    # 탐지 방법들 표시
-                    detection_methods = []
                     if rule_threats:
-                        detection_methods.append(f"패턴: {', '.join(rule_threats)}")
-                    if ai_detected:
-                        detection_methods.append(f"AI: 악성({ai_confidence:.2f})")
-                    if vt_detected:
-                        detection_methods.append(f"VT: {vt_verdict}")
+                        log_text.insert(tk.END, f"[룰] 탐지: {', '.join(rule_threats)}\n")
 
-                    if detection_methods:
-                        log_append(f"    탐지 방법: {' | '.join(detection_methods)}")
+                except Exception as e:
+                    log_text.insert(tk.END, f"[룰] 검사 오류: {str(e)}\n")
 
-                    # 히스토리 기록
-                    history_append(f"🚨 {file_name} - {malware_type}")
-                    for method in detection_methods:
-                        history_append(f"  └ {method}")
+                # === 3단계: VirusTotal 재검증 (의심 파일만) ===
+                virustotal_result = None
+                final_verdict = "정상"
+
+                if is_suspicious and virustotal_available:
+                    log_text.insert(tk.END, f"[VT] 의심 파일 → VirusTotal 재검증 중...\n")
+                    root.update()
+
+                    try:
+                        virustotal_result = api_client.check_file_with_virustotal(file_path)
+
+                        if "error" not in virustotal_result:
+                            malicious = virustotal_result.get('malicious', 0)
+                            suspicious_vt = virustotal_result.get('suspicious', 0)
+                            total = virustotal_result.get('total', 0)
+
+                            if total > 0:
+                                detection_rate = (malicious + suspicious_vt) / total
+                                log_text.insert(tk.END,
+                                                f"[VT] 탐지율: {malicious + suspicious_vt}/{total} ({detection_rate:.1%})\n")
+
+                                # VirusTotal 기준으로 최종 판정 (5개 이상 엔진에서 탐지되면 악성)
+                                if malicious >= 5:
+                                    final_verdict = "🚨 고위험 악성"
+                                elif malicious >= 2 or suspicious_vt >= 3:
+                                    final_verdict = "⚠️ 의심"
+                                else:
+                                    final_verdict = "낮은 위험"
+                            else:
+                                log_text.insert(tk.END, f"[VT] 데이터베이스에 없는 파일\n")
+                                final_verdict = "미확인"
+                        else:
+                            log_text.insert(tk.END, f"[VT] 검사 실패: {virustotal_result['error']}\n")
+                            final_verdict = "AI+룰 기반 의심"
+
+                    except Exception as vt_error:
+                        log_text.insert(tk.END, f"[VT] 오류: {str(vt_error)}\n")
+                        final_verdict = "AI+룰 기반 의심"
+
+                elif is_suspicious and not virustotal_available:
+                    final_verdict = "AI+룰 기반 의심"
+
+                # === 최종 결과 출력 ===
+                if final_verdict != "정상":
+                    if final_verdict == "🚨 고위험 악성":
+                        log_text.insert(tk.END, f"[최종] 🚨 고위험 악성 파일 확인!\n")
+                        history_text.insert(tk.END, f"🚨 {file_name} (고위험 악성)\n")
+                    elif final_verdict == "⚠️ 의심":
+                        log_text.insert(tk.END, f"[최종] ⚠️ 의심스러운 파일\n")
+                        history_text.insert(tk.END, f"⚠️ {file_name} (의심)\n")
+                    else:
+                        log_text.insert(tk.END, f"[최종] ⚠️ 주의 필요 ({final_verdict})\n")
+                        history_text.insert(tk.END, f"⚠️ {file_name} ({final_verdict})\n")
+
+                    # 상세 탐지 내역
+                    if ai_result and ai_result.get('prediction') == "악성":
+                        history_text.insert(tk.END, f"  └ AI: 악성 예측 ({ai_result.get('confidence', 0):.3f})\n")
+
+                    if rule_threats:
+                        history_text.insert(tk.END, f"  └ 룰: {', '.join(rule_threats)}\n")
+
+                    if virustotal_result and "error" not in virustotal_result:
+                        malicious = virustotal_result.get('malicious', 0)
+                        total = virustotal_result.get('total', 0)
+                        if total > 0:
+                            history_text.insert(tk.END, f"  └ VT: {malicious}/{total}개 엔진 탐지\n")
 
                 else:
-                    log_append(f"[✅ 안전] 위험 요소 없음")
+                    log_text.insert(tk.END, f"[최종] ✅ 안전한 파일\n")
 
-                    # VirusTotal 결과가 있으면 추가 정보 표시
-                    if virustotal_checker.is_available():
-                        vt_message = virustotal_checker.format_result_message(vt_result)
-                        log_append(f"    {vt_message}")
+                log_text.insert(tk.END, "-" * 50 + "\n")
+                log_text.see(tk.END)
+                root.update()
 
-                log_append("-" * 50)
+                # API 제한 대응 (VirusTotal 사용 시)
+                if is_suspicious and virustotal_available:
+                    import time
+                    time.sleep(1)  # 1초 대기
 
-            log_append("=== 악성코드 검사 완료 ===")
+            log_text.insert(tk.END, "\n=== 통합 스캔 완료 ===\n")
 
         except Exception as e:
-            log_append(f"[ERROR] 검사 중 오류: {str(e)}")
+            log_text.insert(tk.END, f"\n[ERROR] 스캔 중 오류: {str(e)}\n")
         finally:
             progress_bar.stop()
             progress_window.destroy()
 
+    # 별도 스레드에서 실행
     thread = threading.Thread(target=scan_thread)
     thread.daemon = True
     thread.start()
-
 
 def virustotal_scan():
     """VirusTotal을 이용한 파일 검사"""
