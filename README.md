@@ -120,9 +120,96 @@ git merge dev
 - ✅ **상세 로그** 탐지/제거 내역 추적
 - ✅ **안전한 무해화** 원본 보존
 
-## 📞 문의사항
+5/31 악성코드 탐지 프로그램 명령어 추가 
 
-프로젝트 관련 문의는 GitHub Issues를 이용해주세요.
+# 파일 정리 가이드
 
----
-**⚠️ 이 도구는 보안 연구 목적으로만 사용하세요.**
+## 🗑️ 삭제 가능한 파일들
+
+### 1. 중복 기능 파일
+```bash
+rm utils/ensemble_model.py  # model_trainer.py와 중복
+```
+
+### 2. 일회성/디버깅 파일
+```bash
+rm quick_fix.py            # 환경설정 수정용 (일회성)
+rm debug_env.py            # 디버깅용 임시 파일
+```
+
+### 3. 삭제 명령어 (맥북 터미널)
+```bash
+# 프로젝트 루트에서 실행
+rm quick_fix.py
+rm debug_env.py
+rm utils/ensemble_model.py
+```
+
+## 📁 최종 프로젝트 구조
+
+```
+doc_sanitizer/
+├── main.py                     # 🔥 메인 GUI (개선됨)
+├── config.py                   # API 설정
+├── test_api.py                 # 시스템 테스트
+├── requirements.txt            # 🔥 의존성 (업데이트됨)
+├── README.md                   # 프로젝트 문서
+├── .env.example               # API 키 예시
+├── .gitignore                 # Git 무시 파일
+├── utils/
+│   ├── __init__.py
+│   ├── api_client.py          # API 통신
+│   ├── feature_extractor.py   # 특징 추출
+│   ├── model_manager.py       # 모델 관리
+│   ├── model_trainer.py       # 모델 훈련
+│   ├── malware_classifier.py  # 🔥 악성코드 분류 (신규)
+│   ├── pdf_sanitizer.py       # PDF 무해화
+│   ├── office_macro.py        # Office 매크로 처리
+│   └── hwp_sanitizer.py       # HWP 처리
+├── sample/
+│   ├── mecro/                 # 악성 샘플
+│   └── clear/                 # 정상/정리된 파일
+└── models/                    # AI 모델 저장소
+```
+
+## 🔥 주요 개선사항
+
+### 1. 로그 시스템 개선
+- ✅ 로그가 더 이상 자동으로 초기화되지 않음
+- ✅ 모든 작업 내용이 누적되어 기록됨
+- ✅ 타임스탬프 자동 추가
+- ✅ 수동 로그 초기화 버튼 추가
+
+### 2. 악성코드 유형 분류 추가
+- ✅ `malware_classifier.py` 모듈 신규 생성
+- ✅ 8가지 주요 악성코드 유형 분류
+- ✅ 파일명, 내용, 구조 종합 분석
+- ✅ 신뢰도 점수와 함께 결과 제공
+
+### 3. 사용자 경험 개선
+- ✅ 파일 이동 시 로그 메시지 추가
+- ✅ 모든 작업에 상세한 진행 상황 표시
+- ✅ 에러 메시지 개선
+
+## 🧪 테스트 방법
+
+1. **환경 설정**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **기본 테스트**
+   ```bash
+   python test_api.py test
+   ```
+
+3. **GUI 실행**
+   ```bash
+   python main.py
+   ```
+
+## ⚠️ 주의사항
+
+- 삭제한 파일들은 더 이상 사용되지 않으므로 안전하게 제거 가능
+- 기존 `.env` 파일과 `sample/` 폴더 내용은 보존
+- 모든 기존 기능은 그대로 유지되면서 개선됨
