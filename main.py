@@ -23,7 +23,7 @@ virustotal_checker = create_virustotal_checker()
 
 
 def log_append(text):
-    """로그에 텍스트 추가 (누적)"""
+    """로그에 텍스트 추가"""
     timestamp = time.strftime("[%H:%M:%S] ")
     log_text.insert(tk.END, timestamp + text + "\n")
     log_text.see(tk.END)
@@ -31,7 +31,7 @@ def log_append(text):
 
 
 def history_append(text):
-    """히스토리에 텍스트 추가 (누적)"""
+    """히스토리에 텍스트 추가"""
     timestamp = time.strftime("[%H:%M:%S] ")
     history_text.insert(tk.END, timestamp + text + "\n")
     history_text.see(tk.END)
@@ -39,7 +39,7 @@ def history_append(text):
 
 
 def clear_logs():
-    """로그 수동 초기화"""
+    """로그 초기화"""
     log_text.delete(1.0, tk.END)
     history_text.delete(1.0, tk.END)
     log_append("로그가 초기화되었습니다.")
@@ -111,7 +111,7 @@ def remove_from_target():
 
 
 def scan_for_threats():
-    """기존 룰 기반 탐지"""
+    """룰 기반 탐지"""
     if not target_files:
         messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
         return
@@ -127,11 +127,11 @@ def scan_for_threats():
 
             if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
                 if is_macro_present(file_path):
-                    log_append("[⚠️] 매크로 탐지됨 (vbaProject.bin 존재)")
+                    log_append("[위험] 매크로 탐지됨 (vbaProject.bin 존재)")
                     history_append(f"{file_name}")
                     history_append(f"  └ 탐지: vbaProject.bin")
                 else:
-                    log_append("[OK] 매크로 없음")
+                    log_append("[안전] 매크로 없음")
 
             elif ext == ".pdf":
                 reader = PdfReader(file_path)
@@ -141,12 +141,12 @@ def scan_for_threats():
 
                 found_keys = find_javascript_keys(root)
                 if found_keys:
-                    log_append(f"[⚠️] JavaScript 의심 요소 탐지됨")
+                    log_append(f"[위험] JavaScript 의심 요소 탐지됨")
                     history_append(f"{file_name}")
                     for key in found_keys:
                         history_append(f"  └ 탐지: {key}")
                 else:
-                    log_append("[OK] JavaScript 없음")
+                    log_append("[안전] JavaScript 없음")
 
             elif ext in (".hwp", ".hwpx", ".hwpml"):
                 with open(file_path, "rb") as f:
@@ -156,17 +156,17 @@ def scan_for_threats():
                     if pattern in data:
                         found.append(pattern.decode())
                 if found:
-                    log_append(f"[⚠️] 위험 문자열 탐지됨")
+                    log_append(f"[위험] 위험 문자열 탐지됨")
                     history_append(f"{file_name}")
                     for s in found:
                         history_append(f"  └ 탐지: {s}")
                 else:
-                    log_append("[OK] 위험 문자열 없음")
+                    log_append("[안전] 위험 문자열 없음")
             else:
-                log_append("[X] 지원되지 않는 파일 형식")
+                log_append("[오류] 지원되지 않는 파일 형식")
 
         except Exception as e:
-            log_append(f"[ERROR] 처리 중 오류 발생: {str(e)}")
+            log_append(f"[오류] 처리 중 오류 발생: {str(e)}")
 
     log_append("=== 룰 기반 스캔 완료 ===")
 
@@ -180,7 +180,6 @@ def ai_scan_threats():
     log_text.delete(1.0, tk.END)
     history_text.delete(1.0, tk.END)
 
-    # 프로그레스 바 표시
     progress_window = tk.Toplevel(root)
     progress_window.title("통합 악성코드 탐지 진행 중...")
     progress_window.geometry("400x120")
@@ -193,7 +192,6 @@ def ai_scan_threats():
     progress_bar.pack(pady=10, padx=20, fill='x')
     progress_bar.start()
 
-    # VirusTotal API 클라이언트
     try:
         from utils.api_client import APIClient
         api_client = APIClient()
@@ -205,12 +203,10 @@ def ai_scan_threats():
         try:
             log_text.insert(tk.END, "=== 통합 악성코드 탐지 시작 ===\n")
             if virustotal_available:
-                log_text.insert(tk.END, "✅ VirusTotal API 활성화됨\n")
+                log_text.insert(tk.END, "VirusTotal API 활성화됨\n")
             else:
-                log_text.insert(tk.END, "⚠️ VirusTotal API 비활성화 (의심 파일만 AI+룰 기반 검사)\n")
+                log_text.insert(tk.END, "VirusTotal API 비활성화 (의심 파일만 AI+룰 기반 검사)\n")
             log_text.insert(tk.END, "=" * 50 + "\n")
-
-            suspicious_files = []  # VirusTotal 재검증 대상
 
             for i, file_path in enumerate(target_files):
                 file_name = os.path.basename(file_path)
@@ -221,7 +217,7 @@ def ai_scan_threats():
                 ai_result = None
                 rule_threats = []
 
-                # === 1단계: AI 모델 예측 ===
+                # AI 모델 예측
                 if model_manager.is_model_available() and model_manager.load_model():
                     ai_result = model_manager.predict_file(file_path)
 
@@ -238,7 +234,7 @@ def ai_scan_threats():
                     else:
                         log_text.insert(tk.END, f"[AI] 오류: {ai_result['error']}\n")
 
-                # === 2단계: 룰 기반 탐지 ===
+                # 룰 기반 탐지
                 ext = os.path.splitext(file_path)[1].lower()
 
                 try:
@@ -272,7 +268,7 @@ def ai_scan_threats():
                 except Exception as e:
                     log_text.insert(tk.END, f"[룰] 검사 오류: {str(e)}\n")
 
-                # === 3단계: VirusTotal 재검증 (의심 파일만) ===
+                # VirusTotal 재검증 (의심 파일만)
                 virustotal_result = None
                 final_verdict = "정상"
 
@@ -293,11 +289,10 @@ def ai_scan_threats():
                                 log_text.insert(tk.END,
                                                 f"[VT] 탐지율: {malicious + suspicious_vt}/{total} ({detection_rate:.1%})\n")
 
-                                # VirusTotal 기준으로 최종 판정 (5개 이상 엔진에서 탐지되면 악성)
                                 if malicious >= 5:
-                                    final_verdict = "🚨 고위험 악성"
+                                    final_verdict = "고위험 악성"
                                 elif malicious >= 2 or suspicious_vt >= 3:
-                                    final_verdict = "⚠️ 의심"
+                                    final_verdict = "의심"
                                 else:
                                     final_verdict = "낮은 위험"
                             else:
@@ -314,17 +309,17 @@ def ai_scan_threats():
                 elif is_suspicious and not virustotal_available:
                     final_verdict = "AI+룰 기반 의심"
 
-                # === 최종 결과 출력 ===
+                # 최종 결과 출력
                 if final_verdict != "정상":
-                    if final_verdict == "🚨 고위험 악성":
-                        log_text.insert(tk.END, f"[최종] 🚨 고위험 악성 파일 확인!\n")
-                        history_text.insert(tk.END, f"🚨 {file_name} (고위험 악성)\n")
-                    elif final_verdict == "⚠️ 의심":
-                        log_text.insert(tk.END, f"[최종] ⚠️ 의심스러운 파일\n")
-                        history_text.insert(tk.END, f"⚠️ {file_name} (의심)\n")
+                    if final_verdict == "고위험 악성":
+                        log_text.insert(tk.END, f"[최종] 고위험 악성 파일 확인!\n")
+                        history_text.insert(tk.END, f"{file_name} (고위험 악성)\n")
+                    elif final_verdict == "의심":
+                        log_text.insert(tk.END, f"[최종] 의심스러운 파일\n")
+                        history_text.insert(tk.END, f"{file_name} (의심)\n")
                     else:
-                        log_text.insert(tk.END, f"[최종] ⚠️ 주의 필요 ({final_verdict})\n")
-                        history_text.insert(tk.END, f"⚠️ {file_name} ({final_verdict})\n")
+                        log_text.insert(tk.END, f"[최종] 주의 필요 ({final_verdict})\n")
+                        history_text.insert(tk.END, f"{file_name} ({final_verdict})\n")
 
                     # 상세 탐지 내역
                     if ai_result and ai_result.get('prediction') == "악성":
@@ -340,29 +335,28 @@ def ai_scan_threats():
                             history_text.insert(tk.END, f"  └ VT: {malicious}/{total}개 엔진 탐지\n")
 
                 else:
-                    log_text.insert(tk.END, f"[최종] ✅ 안전한 파일\n")
+                    log_text.insert(tk.END, f"[최종] 안전한 파일\n")
 
                 log_text.insert(tk.END, "-" * 50 + "\n")
                 log_text.see(tk.END)
                 root.update()
 
-                # API 제한 대응 (VirusTotal 사용 시)
                 if is_suspicious and virustotal_available:
                     import time
-                    time.sleep(1)  # 1초 대기
+                    time.sleep(1)
 
             log_text.insert(tk.END, "\n=== 통합 스캔 완료 ===\n")
 
         except Exception as e:
-            log_text.insert(tk.END, f"\n[ERROR] 스캔 중 오류: {str(e)}\n")
+            log_text.insert(tk.END, f"\n[오류] 스캔 중 오류: {str(e)}\n")
         finally:
             progress_bar.stop()
             progress_window.destroy()
 
-    # 별도 스레드에서 실행
     thread = threading.Thread(target=scan_thread)
     thread.daemon = True
     thread.start()
+
 
 def virustotal_scan():
     """VirusTotal을 이용한 파일 검사"""
@@ -399,27 +393,25 @@ def virustotal_scan():
 
                 log_append(f"  └ {vt_message}")
 
-                # 히스토리에도 기록
                 if "error" not in result:
                     verdict = result.get("verdict", "알 수 없음")
 
                     if verdict == "악성":
-                        history_append(f"🚨 {file_name} (VirusTotal: 악성 탐지)")
+                        history_append(f"{file_name} (VirusTotal: 악성 탐지)")
                         malicious = result.get("malicious", 0)
                         total = result.get("total_engines", 0)
                         history_append(f"  └ 탐지 엔진: {malicious}/{total}")
 
                     elif verdict == "의심":
-                        history_append(f"⚠️ {file_name} (VirusTotal: 의심스러움)")
+                        history_append(f"{file_name} (VirusTotal: 의심스러움)")
 
-                # API 제한 방지를 위한 대기
                 if i < len(target_files) - 1:
                     time.sleep(1)
 
             log_append("=== VirusTotal 검사 완료 ===")
 
         except Exception as e:
-            log_append(f"[ERROR] VirusTotal 검사 중 오류: {str(e)}")
+            log_append(f"[오류] VirusTotal 검사 중 오류: {str(e)}")
         finally:
             progress_bar.stop()
             progress_window.destroy()
@@ -446,36 +438,36 @@ def start_sanitization():
             if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
                 clean_file, removed = remove_macro(file_path)
                 if removed:
-                    log_append(f"[✔] 매크로 제거됨: → {os.path.basename(clean_file)}")
+                    log_append(f"[완료] 매크로 제거됨: → {os.path.basename(clean_file)}")
                     history_append(f"{file_name}")
                     history_append(f"  └ 제거: vbaProject.bin")
                 else:
-                    log_append("[OK] 매크로 없음")
+                    log_append("[완료] 매크로 없음")
 
             elif ext == ".pdf":
                 clean_file, removed_keys = sanitize_pdf(file_path)
                 if removed_keys:
-                    log_append(f"[✔] JavaScript 제거됨: → {os.path.basename(clean_file)}")
+                    log_append(f"[완료] JavaScript 제거됨: → {os.path.basename(clean_file)}")
                     history_append(f"{file_name}")
                     for key in removed_keys:
                         history_append(f"  └ 제거: {key}")
                 else:
-                    log_append("[OK] JavaScript 없음")
+                    log_append("[완료] JavaScript 없음")
 
             elif ext in (".hwp", ".hwpx", ".hwpml"):
                 clean_file, removed_strings = sanitize_hwp(file_path)
                 if removed_strings:
-                    log_append(f"[✔] 문자열 제거됨: → {os.path.basename(clean_file)}")
+                    log_append(f"[완료] 문자열 제거됨: → {os.path.basename(clean_file)}")
                     history_append(f"{file_name}")
                     for s in removed_strings:
                         history_append(f"  └ 제거: {s}")
                 else:
-                    log_append("[OK] 위험 문자열 없음")
+                    log_append("[완료] 위험 문자열 없음")
             else:
-                log_append("[X] 지원되지 않는 파일 형식입니다")
+                log_append("[오류] 지원되지 않는 파일 형식입니다")
 
         except Exception as e:
-            log_append(f"[ERROR] 처리 중 오류 발생: {str(e)}")
+            log_append(f"[오류] 처리 중 오류 발생: {str(e)}")
 
     log_append("=== 무해화 완료 ===")
     messagebox.showinfo("완료", "문서 무해화가 완료되었습니다!\n정리된 파일은 sample/clear 폴더에 저장되었습니다.")
@@ -510,16 +502,16 @@ def train_model():
 
             if success:
                 messagebox.showinfo("성공", "AI 모델 훈련이 완료되었습니다!")
-                log_append("✅ AI 모델 훈련 완료!")
+                log_append("AI 모델 훈련 완료!")
                 update_model_status()
             else:
                 messagebox.showerror("실패", "AI 모델 훈련에 실패했습니다.")
-                log_append("❌ AI 모델 훈련 실패")
+                log_append("AI 모델 훈련 실패")
         except Exception as e:
             progress_bar.stop()
             progress_window.destroy()
             messagebox.showerror("오류", f"훈련 중 오류가 발생했습니다: {str(e)}")
-            log_append(f"❌ 훈련 오류: {str(e)}")
+            log_append(f"훈련 오류: {str(e)}")
 
     thread = threading.Thread(target=training_thread)
     thread.daemon = True
@@ -552,13 +544,37 @@ def show_model_info():
     messagebox.showinfo("AI 모델 정보", info_text)
 
 
-# ────────────── GUI 구성 ──────────────
+# GUI 구성
 root = tk.Tk()
 root.title("문서형 악성코드 무해화 시스템 v2.2")
 root.geometry("1200x800")
 root.resizable(False, False)
 
-# ───────── 상단 모델 상태 ─────────
+# 예시 색상 (실제 프로그램 색상에 맞춰 조절해줘)
+APP_BG_COLOR = "#303030"  # 전체적인 어두운 배경색
+TEXT_AREA_BG_COLOR = "#252525" # 텍스트 입력창 배경색 (살짝 다르게)
+TEXT_FG_COLOR = "#E0E0E0"    # 밝은 글자색
+CURSOR_COLOR = "#FFFFFF"     # 흰색 커서
+SCROLLBAR_TROUGH_COLOR = APP_BG_COLOR # 스크롤바 트랙 색상
+SCROLLBAR_BG_COLOR = "#505050" # 스크롤바 핸들 배경 (시스템이 허용하는 선에서)
+
+style = ttk.Style()
+# 사용 가능한 테마 중 어두운 느낌과 어울리는 것을 선택하거나, 기본 테마 기반으로 수정
+# print(style.theme_names()) # 사용 가능한 테마 확인
+# style.theme_use('clam') # 'clam' 테마가 커스터마이징에 유용할 수 있음
+
+# 스크롤바 스타일 정의 (이름은 원하는 대로, 예: "Dark.Vertical.TScrollbar")
+style.configure("Dark.Vertical.TScrollbar",
+                gripcount=0, # Windows에서 핸들 모양에 영향
+                background=SCROLLBAR_BG_COLOR, # 스크롤바 핸들 배경색
+                darkcolor=TEXT_AREA_BG_COLOR,  # 핸들 테두리 등 (효과 미미할 수 있음)
+                lightcolor=TEXT_AREA_BG_COLOR, # 핸들 테두리 등 (효과 미미할 수 있음)
+                troughcolor=SCROLLBAR_TROUGH_COLOR, # 스크롤바가 움직이는 트랙 색상
+                bordercolor=APP_BG_COLOR, # 테두리 색
+                arrowcolor=TEXT_FG_COLOR, # 화살표 색상
+                relief=tk.FLAT) # 평평하게
+
+# 상단 모델 상태
 status_frame = tk.Frame(root)
 status_frame.pack(pady=5)
 
@@ -566,13 +582,13 @@ tk.Button(status_frame, text="모델 정보", command=show_model_info).pack(side
 tk.Button(status_frame, text="모델 재훈련", command=train_model).pack(side=tk.LEFT, padx=5)
 tk.Button(status_frame, text="로그 초기화", command=clear_logs, bg="#FF6B6B", fg="black").pack(side=tk.LEFT, padx=5)
 
-# ───────── 상단 문서 리스트 ─────────
+# 상단 문서 리스트
 top_frame = tk.Frame(root)
 top_frame.pack(pady=15)
 
 left_frame = tk.Frame(top_frame)
 left_frame.pack(side=tk.LEFT, padx=20)
-tk.Label(left_frame, text="📂 업로드된 문서").pack()
+tk.Label(left_frame, text="업로드된 문서").pack()
 left_listbox = tk.Listbox(left_frame, width=40, height=15)
 left_listbox.pack()
 
@@ -583,44 +599,54 @@ tk.Button(center_frame, text="←", width=5, command=remove_from_target).pack(pa
 
 right_frame = tk.Frame(top_frame)
 right_frame.pack(side=tk.LEFT, padx=20)
-tk.Label(right_frame, text="🛡 분석/무해화 대상 문서").pack()
+tk.Label(right_frame, text="분석/무해화 대상 문서").pack()
 right_listbox = tk.Listbox(right_frame, width=40, height=15)
 right_listbox.pack()
 
-# ───────── 중단 버튼들 ─────────
+# 중단 버튼들
 button_frame = tk.Frame(root)
 button_frame.pack(pady=10)
 
 tk.Button(button_frame, text="문서 업로드", width=15, command=upload_files).pack(side=tk.LEFT, padx=5)
 
 ai_scan_button = tk.Button(button_frame, text="악성코드 검사", width=15, command=ai_scan_threats,
-                           bg="#4CAF50", fg="black", font=("Arial", 9, "bold"))
+                           bg="#4CAF50", fg="black")
 ai_scan_button.pack(side=tk.LEFT, padx=5)
 
 tk.Button(button_frame, text="무해화 및 저장", width=15, command=start_sanitization).pack(side=tk.LEFT, padx=5)
 
-# ───────── 로그 출력 영역 ─────────
-log_label = tk.Label(root, text="📄 시스템 로그")
+# 로그 출력 영역
+log_label = tk.Label(root, text="시스템 로그", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR) # 배경/글자색
 log_label.pack()
-log_frame = tk.Frame(root)
-log_frame.pack(pady=5)
+log_frame = tk.Frame(root, bg=TEXT_AREA_BG_COLOR) # 프레임 배경색
+log_frame.pack(pady=5, fill=tk.X, padx=20)
 
-log_text = tk.Text(log_frame, height=8, width=95)
-log_scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=log_text.yview)
+log_text = tk.Text(log_frame, height=8, width=95,
+                   bg=TEXT_AREA_BG_COLOR,    # 텍스트 영역 배경
+                   fg=TEXT_FG_COLOR,       # 텍스트 색상
+                   insertbackground=CURSOR_COLOR, # 커서 색상
+                   relief=tk.FLAT, borderwidth=0)
+log_scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=log_text.yview,
+                              style="Dark.Vertical.TScrollbar") # 위에서 정의한 스타일 적용
 log_text.configure(yscrollcommand=log_scrollbar.set)
-log_text.pack(side="left")
+log_text.pack(side="left", fill=tk.BOTH, expand=True)
 log_scrollbar.pack(side="right", fill="y")
 
-# ───────── 히스토리 출력 영역 ─────────
-history_label = tk.Label(root, text="📋 탐지/무해화 내역 히스토리")
+# 히스토리 출력 영역 (동일하게 수정)
+history_label = tk.Label(root, text="탐지/무해화 내역 히스토리", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR) # 배경/글자색
 history_label.pack()
-history_frame = tk.Frame(root)
-history_frame.pack(pady=5)
+history_frame = tk.Frame(root, bg=TEXT_AREA_BG_COLOR) # 프레임 배경색
+history_frame.pack(pady=5, fill=tk.X, padx=20)
 
-history_text = tk.Text(history_frame, height=8, width=95, bg="#2b2b2b", fg="white", wrap=tk.WORD)
-history_scrollbar = tk.Scrollbar(history_frame, orient="vertical", command=history_text.yview)
+history_text = tk.Text(history_frame, height=8, width=95, wrap=tk.WORD,
+                       bg=TEXT_AREA_BG_COLOR, # 텍스트 영역 배경
+                       fg=TEXT_FG_COLOR,    # 텍스트 색상
+                       insertbackground=CURSOR_COLOR, # 커서 색상
+                       relief=tk.FLAT, borderwidth=0)
+history_scrollbar = ttk.Scrollbar(history_frame, orient="vertical", command=history_text.yview,
+                                  style="Dark.Vertical.TScrollbar") # 위에서 정의한 스타일 적용
 history_text.configure(yscrollcommand=history_scrollbar.set)
-history_text.pack(side="left")
+history_text.pack(side="left", fill=tk.BOTH, expand=True)
 history_scrollbar.pack(side="right", fill="y")
 
 # 시작 메시지

@@ -95,7 +95,7 @@ MALWARE_CLASSIFICATIONS = {
     }
 }
 
-# 훈련 데이터 충분성 기준 (300개 이상 목표)
+# 훈련 데이터 충분성 기준 ( 각 300개 이상 )
 DATA_SUFFICIENCY = {
     'minimum_total_samples': 600,   # 총 600개 (악성 300 + 정상 300)
     'minimum_malware_samples': 300,

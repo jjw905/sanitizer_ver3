@@ -1,8 +1,6 @@
-# =============================================================================
-# 문서형 악성코드 무해화 시스템 - .gitignore
-# =============================================================================
+# 문서형 악성코드 무해화 시스템 v2.2 - .gitignore
 
-# 🔐 보안 관련 파일들 (절대 커밋하면 안됨!)
+# 보안 관련 파일들 (절대 커밋하면 안됨)
 .env
 .env.*
 !.env.example
@@ -15,7 +13,7 @@ secrets.txt
 credentials.json
 config.json
 
-# 🦠 악성코드 샘플 폴더들 (보안상 로컬에만 보관)
+# 악성코드 샘플 폴더들 (보안상 로컬에만 보관)
 sample/mecro/
 sample/mecro_backup/
 sample/clear/
@@ -24,7 +22,7 @@ data/clean/
 malware_samples/
 clean_samples/
 
-# 🧠 AI 모델 파일들 (용량이 크므로 제외)
+# AI 모델 파일들 (용량이 크므로 제외)
 models/
 *.pkl
 *.joblib
@@ -33,7 +31,7 @@ models/
 *.sav
 *.dump
 
-# 🐍 Python 관련 파일들
+# Python 관련 파일들
 __pycache__/
 *.py[cod]
 *$py.class
@@ -57,7 +55,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# 🔧 개발 도구 및 IDE 설정
+# 개발 도구 및 IDE 설정
 .vscode/
 .idea/workspace.xml
 .idea/tasks.xml
@@ -77,7 +75,7 @@ MANIFEST
 *.swo
 *~
 
-# 📊 데이터 및 로그 파일들
+# 데이터 및 로그 파일들
 *.log
 *.logs
 logs/
@@ -90,7 +88,7 @@ temp/
 tmp/
 cache/
 
-# 🗜️ 임시 및 압축 파일들
+# 임시 및 압축 파일들
 temp_unzip/
 *.tmp
 *.temp
@@ -104,7 +102,7 @@ temp_unzip/
 *.tar
 *.gz
 
-# 🖥️ 운영 체제 관련 파일들
+# 운영 체제 관련 파일들
 .DS_Store
 .DS_Store?
 ._*
@@ -114,7 +112,7 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# 🧪 테스트 관련 파일들
+# 테스트 관련 파일들
 .pytest_cache/
 .coverage
 .coverage.*
@@ -128,7 +126,7 @@ htmlcov/
 .cache
 pytest_cache/
 
-# 🌐 가상 환경
+# 가상 환경
 venv/
 env/
 ENV/
@@ -139,19 +137,19 @@ env.bak/
 venv.bak/
 pyvenv.cfg
 
-# 📦 패키지 관리자 파일들
+# 패키지 관리자 파일들
 pip-log.txt
 pip-delete-this-directory.txt
 .pip-cache/
 
-# 🎯 Jupyter Notebook
+# Jupyter Notebook
 .ipynb_checkpoints
 
-# 📱 모바일 관련
+# 모바일 관련
 *.apk
 *.ipa
 
-# 🔒 암호화 및 인증서 파일들
+# 암호화 및 인증서 파일들
 *.crt
 *.csr
 *.der
@@ -162,7 +160,7 @@ pip-delete-this-directory.txt
 *.keystore
 *.jks
 
-# 🏗️ 빌드 관련
+# 빌드 관련
 *.pyc
 *.pyo
 *.pyd
@@ -171,7 +169,7 @@ build/
 dist/
 *.egg-info/
 
-# 📋 문서 작업 파일들
+# 문서 작업 파일들
 *.docx~
 *.xlsx~
 *.pptx~
@@ -179,11 +177,11 @@ dist/
 ~$*.xlsx
 ~$*.pptx
 
-# 🌍 국제화 관련
+# 국제화 관련
 *.mo
 *.pot
 
-# 🎨 미디어 파일들 (용량 관리)
+# 미디어 파일들 (용량 관리)
 *.mp4
 *.avi
 *.mov
@@ -192,7 +190,7 @@ dist/
 *.wav
 *.flac
 
-# 🚀 배포 관련
+# 배포 관련
 *.tar.gz
 *.deb
 *.rpm
@@ -200,25 +198,23 @@ dist/
 *.pkg
 *.msi
 
-# 💾 데이터베이스 파일들
+# 데이터베이스 파일들
 *.db
 *.sqlite
 *.sqlite3
 *.db-journal
 
-# 📊 분석 도구 결과
+# 분석 도구 결과
 .mypy_cache/
 .dmypy.json
 dmypy.json
 
-# 🔄 버전 관리 임시 파일들
+# 버전 관리 임시 파일들
 *.orig
 *.rej
 *.patch
 
-# =============================================================================
 # 프로젝트별 특수 설정
-# =============================================================================
 
 # 중복 프로젝트 폴더들
 sanitizer_ver*/
