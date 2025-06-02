@@ -577,107 +577,116 @@ root.title("문서형 악성코드 무해화 시스템 v2.2")
 root.geometry("1200x800")
 root.resizable(False, False)
 
-# 예시 색상 (실제 프로그램 색상에 맞춰 조절해줘)
-APP_BG_COLOR = "#303030"  # 전체적인 어두운 배경색
-TEXT_AREA_BG_COLOR = "#252525" # 텍스트 입력창 배경색 (살짝 다르게)
-TEXT_FG_COLOR = "#E0E0E0"    # 밝은 글자색
-CURSOR_COLOR = "#FFFFFF"     # 흰색 커서
-SCROLLBAR_TROUGH_COLOR = APP_BG_COLOR # 스크롤바 트랙 색상
-SCROLLBAR_BG_COLOR = "#505050" # 스크롤바 핸들 배경 (시스템이 허용하는 선에서)
+# Notebook(탭) 생성
+notebook = ttk.Notebook(root)
+notebook.pack(fill=tk.BOTH, expand=True)
+
+# ① 무해화/검사 탭
+tab_proc = ttk.Frame(notebook)
+notebook.add(tab_proc, text="무해화 처리")
+
+# ② 모델 관리 탭
+tab_model = ttk.Frame(notebook)
+notebook.add(tab_model, text="모델 정보")
+
+# ───── 탭 ① : 무해화 처리 UI ─────
+# (기존 위젯들을 tab_proc 안에 배치)
+
+# 색상 상수
+APP_BG_COLOR = "#303030"
+TEXT_AREA_BG_COLOR = "#252525"
+TEXT_FG_COLOR = "#E0E0E0"
+CURSOR_COLOR = "#FFFFFF"
+SCROLLBAR_TROUGH_COLOR = APP_BG_COLOR
+SCROLLBAR_BG_COLOR = "#505050"
 
 style = ttk.Style()
-# 사용 가능한 테마 중 어두운 느낌과 어울리는 것을 선택하거나, 기본 테마 기반으로 수정
-# print(style.theme_names()) # 사용 가능한 테마 확인
-# style.theme_use('clam') # 'clam' 테마가 커스터마이징에 유용할 수 있음
-
-# 스크롤바 스타일 정의 (이름은 원하는 대로, 예: "Dark.Vertical.TScrollbar")
 style.configure("Dark.Vertical.TScrollbar",
-                gripcount=0, # Windows에서 핸들 모양에 영향
-                background=SCROLLBAR_BG_COLOR, # 스크롤바 핸들 배경색
-                darkcolor=TEXT_AREA_BG_COLOR,  # 핸들 테두리 등 (효과 미미할 수 있음)
-                lightcolor=TEXT_AREA_BG_COLOR, # 핸들 테두리 등 (효과 미미할 수 있음)
-                troughcolor=SCROLLBAR_TROUGH_COLOR, # 스크롤바가 움직이는 트랙 색상
-                bordercolor=APP_BG_COLOR, # 테두리 색
-                arrowcolor=TEXT_FG_COLOR, # 화살표 색상
-                relief=tk.FLAT) # 평평하게
+                background=SCROLLBAR_BG_COLOR,
+                troughcolor=SCROLLBAR_TROUGH_COLOR,
+                arrowcolor=TEXT_FG_COLOR,
+                relief=tk.FLAT)
 
-# 상단 모델 상태
-status_frame = tk.Frame(root)
-status_frame.pack(pady=5)
-
-tk.Button(status_frame, text="모델 정보", command=show_model_info).pack(side=tk.LEFT, padx=5)
-tk.Button(status_frame, text="모델 재훈련", command=train_model).pack(side=tk.LEFT, padx=5)
-tk.Button(status_frame, text="로그 초기화", command=clear_logs, bg="#FF6B6B", fg="black").pack(side=tk.LEFT, padx=5)
-
-# 상단 문서 리스트
-top_frame = tk.Frame(root)
+# 상단 파일 리스트
+top_frame = tk.Frame(tab_proc)
 top_frame.pack(pady=15)
 
 left_frame = tk.Frame(top_frame)
 left_frame.pack(side=tk.LEFT, padx=20)
+
 tk.Label(left_frame, text="업로드된 문서").pack()
 left_listbox = tk.Listbox(left_frame, width=40, height=15)
 left_listbox.pack()
 
 center_frame = tk.Frame(top_frame)
 center_frame.pack(side=tk.LEFT, padx=10)
-tk.Button(center_frame, text="→", width=5, command=move_to_target).pack(pady=10)
-tk.Button(center_frame, text="←", width=5, command=remove_from_target).pack(pady=10)
+
+tk.Button(center_frame, text="→", width=5, command=lambda: move_to_target()).pack(pady=10)
 
 right_frame = tk.Frame(top_frame)
 right_frame.pack(side=tk.LEFT, padx=20)
+
 tk.Label(right_frame, text="분석/무해화 대상 문서").pack()
 right_listbox = tk.Listbox(right_frame, width=40, height=15)
 right_listbox.pack()
 
 # 중단 버튼들
-button_frame = tk.Frame(root)
+button_frame = tk.Frame(tab_proc)
 button_frame.pack(pady=10)
-
-tk.Button(button_frame, text="문서 업로드", width=15, command=upload_files).pack(side=tk.LEFT, padx=5)
 
 ai_scan_button = tk.Button(button_frame, text="악성코드 검사", width=15, command=ai_scan_threats,
                            bg="#4CAF50", fg="black")
+
+tk.Button(button_frame, text="문서 업로드", width=15, command=upload_files).pack(side=tk.LEFT, padx=5)
 ai_scan_button.pack(side=tk.LEFT, padx=5)
 
 tk.Button(button_frame, text="무해화 및 저장", width=15, command=start_sanitization).pack(side=tk.LEFT, padx=5)
 
-# 로그 출력 영역
-log_label = tk.Label(root, text="시스템 로그", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR) # 배경/글자색
+# 로그 영역
+log_label = tk.Label(tab_proc, text="시스템 로그", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR)
 log_label.pack()
-log_frame = tk.Frame(root, bg=TEXT_AREA_BG_COLOR) # 프레임 배경색
+
+log_frame = tk.Frame(tab_proc, bg=TEXT_AREA_BG_COLOR)
 log_frame.pack(pady=5, fill=tk.X, padx=20)
 
-log_text = tk.Text(log_frame, height=8, width=95,
-                   bg=TEXT_AREA_BG_COLOR,    # 텍스트 영역 배경
-                   fg=TEXT_FG_COLOR,       # 텍스트 색상
-                   insertbackground=CURSOR_COLOR, # 커서 색상
-                   relief=tk.FLAT, borderwidth=0)
+log_text = tk.Text(log_frame, height=8, width=95, bg=TEXT_AREA_BG_COLOR, fg=TEXT_FG_COLOR,
+                   insertbackground=CURSOR_COLOR, relief=tk.FLAT, borderwidth=0)
 log_scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=log_text.yview,
-                              style="Dark.Vertical.TScrollbar") # 위에서 정의한 스타일 적용
+                              style="Dark.Vertical.TScrollbar")
 log_text.configure(yscrollcommand=log_scrollbar.set)
 log_text.pack(side="left", fill=tk.BOTH, expand=True)
 log_scrollbar.pack(side="right", fill="y")
 
-# 히스토리 출력 영역 (동일하게 수정)
-history_label = tk.Label(root, text="탐지/무해화 내역 히스토리", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR) # 배경/글자색
+# 히스토리 영역
+history_label = tk.Label(tab_proc, text="탐지/무해화 내역 히스토리", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR)
 history_label.pack()
-history_frame = tk.Frame(root, bg=TEXT_AREA_BG_COLOR) # 프레임 배경색
+
+history_frame = tk.Frame(tab_proc, bg=TEXT_AREA_BG_COLOR)
 history_frame.pack(pady=5, fill=tk.X, padx=20)
 
-history_text = tk.Text(history_frame, height=8, width=95, wrap=tk.WORD,
-                       bg=TEXT_AREA_BG_COLOR, # 텍스트 영역 배경
-                       fg=TEXT_FG_COLOR,    # 텍스트 색상
-                       insertbackground=CURSOR_COLOR, # 커서 색상
-                       relief=tk.FLAT, borderwidth=0)
+history_text = tk.Text(history_frame, height=8, width=95, wrap=tk.WORD, bg=TEXT_AREA_BG_COLOR,
+                       fg=TEXT_FG_COLOR, insertbackground=CURSOR_COLOR, relief=tk.FLAT, borderwidth=0)
 history_scrollbar = ttk.Scrollbar(history_frame, orient="vertical", command=history_text.yview,
-                                  style="Dark.Vertical.TScrollbar") # 위에서 정의한 스타일 적용
+                                  style="Dark.Vertical.TScrollbar")
 history_text.configure(yscrollcommand=history_scrollbar.set)
 history_text.pack(side="left", fill=tk.BOTH, expand=True)
 history_scrollbar.pack(side="right", fill="y")
 
-# 시작 메시지
+# ───── 탭 ② : 모델 정보 UI ─────
+status_frame = tk.Frame(tab_model)
+status_frame.pack(pady=20)
+
+btn_info     = tk.Button(status_frame, text="모델 정보", command=lambda: show_model_info())
+btn_retrain  = tk.Button(status_frame, text="모델 재훈련", command=lambda: train_model())
+btn_info.grid(row=0, column=0, padx=10)
+btn_retrain.grid(row=0, column=1, padx=10)
+
+# 로그 초기화 버튼을 모델 탭으로 옮김 (필요 시 유지)
+btn_clear = tk.Button(status_frame, text="로그 초기화", bg="#FF6B6B", command=clear_logs)
+btn_clear.grid(row=0, column=2, padx=10)
+
+# ────────────────────── 기타 초기화 ─────────────────────
 root.after(500, lambda: log_append("문서형 악성코드 무해화 시스템 v2.2 시작"))
-root.after(1000, update_model_status)
+root.after(1000, lambda: update_model_status())
 
 root.mainloop()
