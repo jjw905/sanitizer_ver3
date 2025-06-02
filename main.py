@@ -19,6 +19,7 @@ load_dotenv()                      # .env 파일 읽기
 import config           # AWS/RDS 설정값
 from utils import aws_helper       # S3 다운로드/업로드 래퍼
 from utils.model_trainer import ModelTrainer
+from utils.aws_helper import get_s3_model_info
 
 def bootstrap_models():
     """
@@ -544,31 +545,40 @@ def train_model():
     thread.daemon = True
     thread.start()
 
-
 def show_model_info():
-    """모델 정보 표시"""
-    info = model_manager.get_model_info()
-    data_status = model_manager.get_training_data_status()
+    info_text = ""
 
-    info_text = f"""=== AI 모델 정보 ===
+    if config.USE_AWS:
+        s3_info = get_s3_model_info("models/ensemble_model.pkl")
 
-모델 상태: {'사용 가능' if info['model_available'] else '없음'}
-모델 로드: {'완료' if info['model_loaded'] else '대기'}
-
-훈련 데이터:
-  - 악성 샘플: {data_status['malware_samples']}개
-  - 정상 샘플: {data_status['clean_samples']}개
-  - 총 샘플: {data_status['total_samples']}개
-  - 데이터 충분성: {'충분' if data_status['sufficient_data'] else '부족'}
-
+        if "error" not in s3_info:
+            info_text += f"""=== S3 모델 메타 정보 ===
+업로드 시각: {s3_info['last_modified']}
+SHA256 해시: {s3_info['sha256'][:32]}...
+S3 모델 크기: {s3_info['size_mb']} MB
 """
 
-    if info['model_available']:
-        info_text += f"""모델 파일 크기: {info.get('model_size_mb', 0)} MB
-스케일러 크기: {info.get('scaler_size_kb', 0)} KB
+            meta = s3_info.get("meta", {})
+            if meta and "error" not in meta:
+                info_text += f"""\n=== S3 모델 학습 정보 ===
+악성 샘플: {meta['malware_samples']}개
+정상 샘플: {meta['clean_samples']}개
+총 샘플: {meta['total_samples']}개
+정확도: {meta['accuracy']:.3f}
+훈련 시각: {meta['trained_at']}
+모델 버전: {meta['model_version']}
 """
+            else:
+                info_text += "\n[S3] model_meta.json 없음 또는 파싱 실패"
+        else:
+            info_text += f"\n[S3 오류] {s3_info['error']}"
+
+    else:
+        info_text = "USE_AWS=false → 로컬 메타 조회는 제거됨"
 
     messagebox.showinfo("AI 모델 정보", info_text)
+
+
 
 
 # GUI 구성
