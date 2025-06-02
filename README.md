@@ -1,5 +1,5 @@
-문서형 악성코드 무해화 시스템 v2.2
-Microsoft Office, PDF, 한글 문서의 악성코드 탐지 및 무해화 시스템
+# 문서형 악성코드 무해화 시스템 v2.2 
+# Microsoft Office, PDF, 한글 문서의 악성코드 탐지 및 무해화 시스템
 
 빠른 시작
 1. 환경 설정
@@ -8,14 +8,14 @@ Microsoft Office, PDF, 한글 문서의 악성코드 탐지 및 무해화 시스
 bash
 pip install -r requirements.txt
 cp .env.example .env
-# .env 파일을 열어서 실제 API 키로 교체
+(.env 파일을 열어서 실제 API 키로 교체)
 
 윈도우 (Windows)
 cmd
 pip install -r requirements.txt
 copy .env.example .env
+(.env 파일을 메모장으로 열어서 실제 API 키로 교체)
 
-# .env 파일을 메모장으로 열어서 실제 API 키로 교체
 2. API 키 발급
 MalwareBazaar: https://bazaar.abuse.ch/api/
 VirusTotal: https://www.virustotal.com/gui/my-apikey
