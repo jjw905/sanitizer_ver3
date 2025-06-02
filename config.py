@@ -1,8 +1,16 @@
 # config.py - 개선된 버전
 import os
-from dotenv import load_dotenv
-
+import os; from dotenv import load_dotenv
 load_dotenv()
+
+USE_AWS         = os.getenv("USE_AWS", "false").lower() == "true"
+AWS_REGION      = os.getenv("AWS_REGION", "ap-southeast-2")
+S3_BUCKET       = os.getenv("S3_BUCKET", "malware-sample-878585013612")
+
+RDS_HOST        = os.getenv("RDS_HOST")
+RDS_DB          = os.getenv("RDS_DB")
+RDS_USER        = os.getenv("RDS_USER")
+RDS_PASSWORD    = os.getenv("RDS_PASSWORD")
 
 # API 키 설정
 API_KEYS = {
@@ -117,3 +125,4 @@ TRIAGE_CONFIG = {
         'tag:ppt', 'tag:pptx', 'tag:rtf'
     ]
 }
+
