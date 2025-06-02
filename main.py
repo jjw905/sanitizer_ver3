@@ -14,13 +14,40 @@ from utils.hwp_sanitizer import sanitize_hwp
 from utils.model_manager import get_model_manager
 from utils.malware_classifier import MalwareClassifier
 from utils.virustotal_checker import create_virustotal_checker
+from dotenv import load_dotenv
+load_dotenv()                      # .env 파일 읽기
+import config           # AWS/RDS 설정값
+from utils import aws_helper       # S3 다운로드/업로드 래퍼
+from utils.model_trainer import ModelTrainer
+
+def bootstrap_models():
+    """
+    첫 실행 때 S3에서 모델 & 스케일러를 내려받는다.
+    이미 로컬에 있으면 생략.
+    """
+    targets = {
+        "models/ensemble_model.pkl": "models/ensemble_model.pkl",
+        "models/scaler.pkl":         "models/scaler.pkl",
+    }
+
+    if not config.USE_AWS:
+        print("[BOOT] USE_AWS=false → S3 동기화 건너뜀")
+        return
+
+    for s3_key, local_path in targets.items():
+        if not os.path.exists(local_path):
+            print(f"[BOOT] S3 → {local_path} 다운로드 시도")
+            aws_helper.download(s3_key, local_path)
+        else:
+            print(f"[BOOT] {local_path} 이미 존재 → 건너뜀")
+
+bootstrap_models()
 
 uploaded_files = []
 target_files = []
 model_manager = get_model_manager()
 malware_classifier = MalwareClassifier()
 virustotal_checker = create_virustotal_checker()
-
 
 def log_append(text):
     """로그에 텍스트 추가"""
