@@ -242,6 +242,12 @@ class ModelTrainer:
             # 모델 저장
             self.save_model()
 
+            self.save_model_metadata(
+                accuracy=ensemble_accuracy,
+                malware_count=int(np.sum(labels)),
+                clean_count=int(len(labels) - np.sum(labels)),
+                model_version="2.2"
+            )
             print("✅ 모델 훈련 완료!")
             return True, ensemble_accuracy
 
@@ -466,6 +472,24 @@ class ModelTrainer:
                 print(
                     f"정상 파일 {file_name}: {result.get('prediction', 'Error')} (신뢰도: {result.get('confidence', 0):.3f})")
 
+    def save_model_metadata(self, accuracy: float, malware_count: int, clean_count: int, model_version="1.0"):
+        import json
+        from datetime import datetime
+
+        meta = {
+            "malware_samples": malware_count,
+            "clean_samples": clean_count,
+            "total_samples": malware_count + clean_count,
+            "accuracy": round(accuracy, 4),
+            "trained_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "model_version": model_version
+        }
+
+        with open("models/model_meta.json", "w") as f:
+            json.dump(meta, f)
+
+        print("✅ model_meta.json 저장 완료")
+
 
 def train_model():
     """모델 훈련 실행 함수"""
@@ -522,7 +546,6 @@ def update_model():
         print("❌ 모델 업데이트 실패")
 
     return success
-
 
 if __name__ == "__main__":
     import sys
