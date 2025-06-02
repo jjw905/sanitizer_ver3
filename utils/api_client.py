@@ -460,7 +460,7 @@ class APIClient:
                     "total": sum(stats.values()) if stats else 0
                 }
             else:
-                return {"error": f"조회 실패: {response.status_code}"}
+                return {"error": f"VirusTotal에 데이터 없음 (404)"}
 
         except Exception as e:
             return {"error": f"검사 중 오류: {str(e)}"}
