@@ -132,3 +132,7 @@ aws s3 cp models/model_meta.json s3://doc-sanitizer-bucket/models/
 ssh -i <키 경로> -L 8000:localhost:8000 ec2-user@<EC2 인스턴스 IP>
 ```
 (키 경로 예시: C:\Users\sskm0\sanitizer_key.pem)
+3. 백엔드 서버 열기
+```sh
+uvicorn retrain_server:app --host 0.0.0.0 --port 8000
+```
