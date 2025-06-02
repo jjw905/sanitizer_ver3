@@ -5,6 +5,8 @@ from tkinter import filedialog, messagebox, ttk
 import os
 import threading
 import time
+import requests
+from tkinter import messagebox
 
 from PyPDF2 import PdfReader
 from PyPDF2.generic import IndirectObject
@@ -545,6 +547,25 @@ def train_model():
     thread.daemon = True
     thread.start()
 
+def retrain_model_remotely():
+    try:
+        response = requests.post("http://localhost:8000/train", timeout=600)
+        if response.status_code == 200:
+            data = response.json()
+            messagebox.showinfo("재훈련 완료", f"""
+정확도: {data['accuracy']:.3f}
+악성 샘플: {data['malware_samples']}개
+정상 샘플: {data['clean_samples']}개
+총 샘플: {data['total_samples']}개
+훈련 시각: {data['trained_at']}
+버전: {data['model_version']}
+""")
+        else:
+            messagebox.showerror("실패", f"학습 실패: {response.status_code}")
+    except Exception as e:
+        messagebox.showerror("에러", f"연결 실패:\n{str(e)}")
+
+
 def show_model_info():
     info_text = ""
 
@@ -652,6 +673,10 @@ ai_scan_button.pack(side=tk.LEFT, padx=5)
 
 tk.Button(button_frame, text="무해화 및 저장", width=15, command=start_sanitization).pack(side=tk.LEFT, padx=5)
 
+# 로그 초기화 버튼
+btn_clear = tk.Button(button_frame, text="로그 초기화", bg="#FF6B6B", command=clear_logs)
+btn_clear.pack(side=tk.LEFT, padx=5)  # ← 다른 버튼들과 동일하게 pack 사용
+
 # 로그 영역
 log_label = tk.Label(tab_proc, text="시스템 로그", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR)
 log_label.pack()
@@ -686,14 +711,11 @@ history_scrollbar.pack(side="right", fill="y")
 status_frame = tk.Frame(tab_model)
 status_frame.pack(pady=20)
 
-btn_info     = tk.Button(status_frame, text="모델 정보", command=lambda: show_model_info())
-btn_retrain  = tk.Button(status_frame, text="모델 재훈련", command=lambda: train_model())
+btn_info     = tk.Button(status_frame, text="모델 정보", command=show_model_info)
+btn_retrain  = tk.Button(status_frame, text="모델 재훈련", command=retrain_model_remotely)
+
 btn_info.grid(row=0, column=0, padx=10)
 btn_retrain.grid(row=0, column=1, padx=10)
-
-# 로그 초기화 버튼을 모델 탭으로 옮김 (필요 시 유지)
-btn_clear = tk.Button(status_frame, text="로그 초기화", bg="#FF6B6B", command=clear_logs)
-btn_clear.grid(row=0, column=2, padx=10)
 
 # ────────────────────── 기타 초기화 ─────────────────────
 root.after(500, lambda: log_append("문서형 악성코드 무해화 시스템 v2.2 시작"))
