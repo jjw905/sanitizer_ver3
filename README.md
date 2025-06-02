@@ -121,3 +121,9 @@ git pull origin dev
 ```
 - sample/mecro/ 폴더는 로컬에만 존재
 - 모델 파일은 용량 문제로 Git에서 제외됨
+
+# AWS EC2 시그니처 모델 관련 명령어
+1. S3 버킷 업로드
+```sh
+aws s3 cp models/model_meta.json s3://doc-sanitizer-bucket/models/
+```
