@@ -127,3 +127,8 @@ git pull origin dev
 ```sh
 aws s3 cp models/model_meta.json s3://doc-sanitizer-bucket/models/
 ```
+2. CLI 원격 접속
+```sh
+ssh -i <키 경로> -L 8000:localhost:8000 ec2-user@<EC2 인스턴스 IP>
+```
+(키 경로 예시: C:\Users\sskm0\sanitizer_key.pem)
