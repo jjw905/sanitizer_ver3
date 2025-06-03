@@ -14,3 +14,12 @@ reportlab>=4.0.0
 # 선택적 라이브러리 (성능 향상)
 matplotlib>=3.7.0
 seaborn>=0.12.0
+
+# 데이터베이스
+boto3>=1.34
+SQLAlchemy>=2.0
+pymysql>=1.1
+
+# 서버
+uvicorn
+fastapi

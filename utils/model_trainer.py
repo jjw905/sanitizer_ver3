@@ -11,6 +11,8 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 from sklearn.ensemble import VotingClassifier
 import pandas as pd
 from utils.feature_extractor import FeatureExtractor
+from sqlalchemy import text          
+from utils import db
 
 
 class ModelTrainer:
@@ -72,21 +74,41 @@ class ModelTrainer:
 
         return features, labels
 
-    def save_training_history(self, features, labels, model_version="1.0"):
-        """훈련 기록 저장 (증분 학습용)"""
+    def save_training_history(
+        self,
+        features,
+        labels,
+        accuracy: float,             # ⬅ accuracy 인자 추가
+        model_version: str = "1.0"
+    ):
+        """훈련 기록을 RDS + 로컬 파일에 저장"""
         try:
             history_data = {
-                'features': features,
-                'labels': labels,
-                'model_version': model_version,
-                'training_date': pd.Timestamp.now(),
-                'sample_count': len(features)
+                "features": features,
+                "labels": labels,
+                "model_version": model_version,
+                "training_date": pd.Timestamp.now(),
+                "sample_count": len(features),
+                "accuracy": accuracy
             }
 
-            with open(self.training_history_path, 'wb') as f:
+            # ─── 1) RDS INSERT ──────────────────────────
+            if db.engine:                            # ← RDS 연결이 있을 때만
+                with db.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "INSERT INTO training_history "
+                            "(model_ver, sample_count, accuracy) "
+                            "VALUES (:v, :c, :a)"
+                        ),
+                        {"v": model_version, "c": len(features), "a": accuracy}
+                    )
+
+            # ─── 2) 로컬 history 파일 (증분 학습용) ───────
+            with open(self.training_history_path, "wb") as f:
                 pickle.dump(history_data, f)
 
-            print(f"✅ 훈련 기록 저장 완료: {len(features)}개 샘플")
+            print(f"✅ 훈련 기록 저장 완료: {len(features)}개 샘플, acc={accuracy:.3f}")
 
         except Exception as e:
             print(f"❌ 훈련 기록 저장 실패: {e}")
@@ -154,11 +176,11 @@ class ModelTrainer:
             combined_labels = new_labels
 
         # 모델 훈련
-        success = self._train_with_data(combined_features, combined_labels, test_size)
+        success, ensemble_accuracy = self._train_with_data(combined_features, combined_labels, test_size)
 
         if success:
             # 새로운 훈련 기록 저장
-            self.save_training_history(combined_features, combined_labels, "2.0+")
+            self.save_training_history(combined_features, combined_labels, "2.0+", ensemble_accuracy, "2.0+")
 
         return success
 
@@ -173,11 +195,11 @@ class ModelTrainer:
             return False
 
         # 모델 훈련
-        success = self._train_with_data(features, labels, test_size)
+        success, ensemble_accuracy = self._train_with_data(features, labels, test_size)
 
         if success:
             # 훈련 기록 저장
-            self.save_training_history(features, labels, "1.0")
+            self.save_training_history(features, labels, ensemble_accuracy, "1.0")
 
         return success
 
@@ -220,12 +242,18 @@ class ModelTrainer:
             # 모델 저장
             self.save_model()
 
+            self.save_model_metadata(
+                accuracy=ensemble_accuracy,
+                malware_count=int(np.sum(labels)),
+                clean_count=int(len(labels) - np.sum(labels)),
+                model_version="2.2"
+            )
             print("✅ 모델 훈련 완료!")
-            return True
+            return True, ensemble_accuracy
 
         except Exception as e:
             print(f"❌ 모델 훈련 실패: {e}")
-            return False
+            return False, None
 
     def train_individual_models(self, X_train, X_test, y_train, y_test):
         """개별 모델 훈련 및 평가"""
@@ -444,6 +472,24 @@ class ModelTrainer:
                 print(
                     f"정상 파일 {file_name}: {result.get('prediction', 'Error')} (신뢰도: {result.get('confidence', 0):.3f})")
 
+    def save_model_metadata(self, accuracy: float, malware_count: int, clean_count: int, model_version="1.0"):
+        import json
+        from datetime import datetime
+
+        meta = {
+            "malware_samples": malware_count,
+            "clean_samples": clean_count,
+            "total_samples": malware_count + clean_count,
+            "accuracy": round(accuracy, 4),
+            "trained_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "model_version": model_version
+        }
+
+        with open("models/model_meta.json", "w") as f:
+            json.dump(meta, f)
+
+        print("✅ model_meta.json 저장 완료")
+
 
 def train_model():
     """모델 훈련 실행 함수"""
@@ -500,7 +546,6 @@ def update_model():
         print("❌ 모델 업데이트 실패")
 
     return success
-
 
 if __name__ == "__main__":
     import sys

@@ -121,3 +121,18 @@ git pull origin dev
 ```
 - sample/mecro/ 폴더는 로컬에만 존재
 - 모델 파일은 용량 문제로 Git에서 제외됨
+
+# AWS EC2 시그니처 모델 관련 명령어
+1. S3 버킷 업로드
+```sh
+aws s3 cp models/model_meta.json s3://doc-sanitizer-bucket/models/
+```
+2. CLI 원격 접속
+```sh
+ssh -i <키 경로> -L 8000:localhost:8000 ec2-user@<EC2 인스턴스 IP>
+```
+(키 경로 예시: C:\Users\sskm0\sanitizer_key.pem)
+3. 백엔드 서버 열기
+```sh
+uvicorn retrain_server:app --host 0.0.0.0 --port 8000
+```
