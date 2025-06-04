@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from utils.api_client import APIClient, collect_training_data
 from utils.model_manager import ModelManager
 from utils.model_trainer import train_model
+import config
 
 
 class OptimizedProgressTracker:
@@ -41,10 +42,9 @@ def test_system():
     mb_status = "✅" if api_client.malware_bazaar_key and api_client.test_malware_bazaar_connection() else "❌"
     print(f"   MalwareBazaar: {mb_status}")
 
-    # Triage API (선택사항)
-    triage_status = "✅" if hasattr(api_client,
-                                   'triage_key') and api_client.triage_key and api_client.test_triage_connection() else "⚠️"
-    print(f"   Triage: {triage_status} (선택사항)")
+    # VirusTotal API
+    vt_status = "✅" if api_client.virustotal_key and api_client.test_virustotal_connection() else "❌"
+    print(f"   VirusTotal: {vt_status}")
 
     print("\n2. AI 모델 상태")
     model_manager = ModelManager()
@@ -177,19 +177,19 @@ def quick_test():
     # 테스트 파일 수집
     test_files = []
 
-    if os.path.exists("sample/mecro"):
+    if os.path.exists(config.DIRECTORIES['malware_samples']):
         malware_files = [
-            os.path.join("sample/mecro", f)
-            for f in os.listdir("sample/mecro")[:3]
-            if os.path.isfile(os.path.join("sample/mecro", f))
+            os.path.join(config.DIRECTORIES['malware_samples'], f)
+            for f in os.listdir(config.DIRECTORIES['malware_samples'])[:3]
+            if os.path.isfile(os.path.join(config.DIRECTORIES['malware_samples'], f))
         ]
         test_files.extend(malware_files)
 
-    if os.path.exists("sample/clear"):
+    if os.path.exists(config.DIRECTORIES['clean_samples']):
         clean_files = [
-            os.path.join("sample/clear", f)
-            for f in os.listdir("sample/clear")[:3]
-            if os.path.isfile(os.path.join("sample/clear", f))
+            os.path.join(config.DIRECTORIES['clean_samples'], f)
+            for f in os.listdir(config.DIRECTORIES['clean_samples'])[:3]
+            if os.path.isfile(os.path.join(config.DIRECTORIES['clean_samples'], f))
         ]
         test_files.extend(clean_files)
 
@@ -201,7 +201,7 @@ def quick_test():
 
     for file_path in test_files:
         file_name = os.path.basename(file_path)
-        expected_type = "악성" if "mecro" in file_path else "정상"
+        expected_type = "악성" if config.DIRECTORIES['malware_samples'] in file_path else "정상"
 
         result = model_manager.predict_file(file_path)
 
@@ -241,10 +241,16 @@ def show_system_info():
     # API 상태
     api_client = APIClient()
     mb_available = bool(api_client.malware_bazaar_key)
-    triage_available = bool(hasattr(api_client, 'triage_key') and api_client.triage_key)
+    vt_available = bool(api_client.virustotal_key)
 
     print(f"MalwareBazaar API: {'사용 가능' if mb_available else '키 없음'}")
-    print(f"Triage API: {'사용 가능' if triage_available else '키 없음 (선택사항)'}")
+    print(f"VirusTotal API: {'사용 가능' if vt_available else '키 없음'}")
+
+    # AWS 상태
+    print(f"AWS 연동: {'활성화' if config.USE_AWS else '비활성화'}")
+    if config.USE_AWS:
+        print(f"S3 버킷: {config.S3_BUCKET}")
+        print(f"AWS 리전: {config.AWS_REGION}")
 
 
 def main():

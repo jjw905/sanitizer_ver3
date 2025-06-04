@@ -1,4 +1,4 @@
-# main.py
+# main.py - 최종 버전
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -17,40 +17,51 @@ from utils.model_manager import get_model_manager
 from utils.malware_classifier import MalwareClassifier
 from utils.virustotal_checker import create_virustotal_checker
 from dotenv import load_dotenv
-load_dotenv()                      # .env 파일 읽기
-import config           # AWS/RDS 설정값
-from utils import aws_helper       # S3 다운로드/업로드 래퍼
+
+load_dotenv()
+import config
+from utils import aws_helper
 from utils.model_trainer import ModelTrainer
 from utils.aws_helper import get_s3_model_info
 
-def bootstrap_models():
-    """
-    첫 실행 때 S3에서 모델 & 스케일러를 내려받는다.
-    이미 로컬에 있으면 생략.
-    """
-    targets = {
-        "models/ensemble_model.pkl": "models/ensemble_model.pkl",
-        "models/scaler.pkl":         "models/scaler.pkl",
-    }
 
+def bootstrap_models():
+    """첫 실행 때 S3에서 모델 다운로드"""
     if not config.USE_AWS:
         print("[BOOT] USE_AWS=false → S3 동기화 건너뜀")
         return
 
+    # 모델 디렉토리 생성
+    os.makedirs("models", exist_ok=True)
+
+    targets = {
+        "models/ensemble_model.pkl": "models/ensemble_model.pkl",
+        "models/scaler.pkl": "models/scaler.pkl",
+        "models/model_meta.json": "models/model_meta.json"
+    }
+
     for s3_key, local_path in targets.items():
         if not os.path.exists(local_path):
             print(f"[BOOT] S3 → {local_path} 다운로드 시도")
-            aws_helper.download(s3_key, local_path)
+            try:
+                aws_helper.download(s3_key, local_path)
+                if os.path.exists(local_path):
+                    print(f"[BOOT] {local_path} 다운로드 성공")
+                else:
+                    print(f"[BOOT] {local_path} 다운로드 실패")
+            except Exception as e:
+                print(f"[BOOT] {local_path} 다운로드 오류: {e}")
         else:
             print(f"[BOOT] {local_path} 이미 존재 → 건너뜀")
+
 
 bootstrap_models()
 
 uploaded_files = []
-target_files = []
 model_manager = get_model_manager()
 malware_classifier = MalwareClassifier()
 virustotal_checker = create_virustotal_checker()
+
 
 def log_append(text):
     """로그에 텍스트 추가"""
@@ -75,15 +86,6 @@ def clear_logs():
     log_append("로그가 초기화되었습니다.")
 
 
-def classify_malware_type(file_path):
-    """악성코드 유형 분류"""
-    try:
-        malware_type = malware_classifier.classify_malware(file_path)
-        return malware_type
-    except Exception as e:
-        return f"분류 오류: {str(e)}"
-
-
 def update_model_status():
     """모델 상태 업데이트"""
     if model_manager.is_model_available():
@@ -95,115 +97,31 @@ def update_model_status():
         ai_scan_button.config(state="disabled")
 
 
-def upload_files():
+def upload_and_scan_files():
+    """파일 업로드 후 즉시 검사"""
     files = filedialog.askopenfilenames(
         filetypes=[("지원 문서 형식", "*.docx *.docm *.xlsx *.xlsm *.pptx *.pptm *.pdf *.hwp *.hwpx *.hwpml")]
     )
-    for f in files:
-        if f not in uploaded_files:
-            uploaded_files.append(f)
-            left_listbox.insert(tk.END, os.path.basename(f))
 
-    if files:
-        log_append(f"{len(files)}개 파일이 업로드되었습니다.")
-
-
-def move_to_target():
-    selected = left_listbox.curselection()
-    moved_count = 0
-    for i in selected[::-1]:
-        file = uploaded_files[i]
-        if file not in target_files:
-            target_files.append(file)
-            right_listbox.insert(tk.END, os.path.basename(file))
-            moved_count += 1
-    for i in selected[::-1]:
-        left_listbox.delete(i)
-        del uploaded_files[i]
-
-    if moved_count > 0:
-        log_append(f"{moved_count}개 파일이 분석 대상으로 이동되었습니다.")
-
-
-def remove_from_target():
-    selected = right_listbox.curselection()
-    moved_count = 0
-    for i in selected[::-1]:
-        file = target_files[i]
-        uploaded_files.append(file)
-        left_listbox.insert(tk.END, os.path.basename(file))
-        right_listbox.delete(i)
-        del target_files[i]
-        moved_count += 1
-
-    if moved_count > 0:
-        log_append(f"{moved_count}개 파일이 업로드 목록으로 되돌려졌습니다.")
-
-
-def scan_for_threats():
-    """룰 기반 탐지"""
-    if not target_files:
-        messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
+    if not files:
         return
 
-    log_append("=== 룰 기반 악성코드 탐지 시작 ===")
+    uploaded_files.clear()
+    file_listbox.delete(0, tk.END)
 
-    for file_path in target_files:
-        ext = os.path.splitext(file_path)[1].lower()
-        file_name = os.path.basename(file_path)
+    for f in files:
+        uploaded_files.append(f)
+        file_listbox.insert(tk.END, os.path.basename(f))
 
-        try:
-            log_append(f"[INFO] 문서 분석: {file_name}")
+    log_append(f"{len(files)}개 파일이 업로드되어 검사를 시작합니다.")
 
-            if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
-                if is_macro_present(file_path):
-                    log_append("[위험] 매크로 탐지됨 (vbaProject.bin 존재)")
-                    history_append(f"{file_name}")
-                    history_append(f"  └ 탐지: vbaProject.bin")
-                else:
-                    log_append("[안전] 매크로 없음")
-
-            elif ext == ".pdf":
-                reader = PdfReader(file_path)
-                root = reader.trailer.get("/Root", {})
-                if isinstance(root, IndirectObject):
-                    root = root.get_object()
-
-                found_keys = find_javascript_keys(root)
-                if found_keys:
-                    log_append(f"[위험] JavaScript 의심 요소 탐지됨")
-                    history_append(f"{file_name}")
-                    for key in found_keys:
-                        history_append(f"  └ 탐지: {key}")
-                else:
-                    log_append("[안전] JavaScript 없음")
-
-            elif ext in (".hwp", ".hwpx", ".hwpml"):
-                with open(file_path, "rb") as f:
-                    data = f.read()
-                found = []
-                for pattern in [b'Shell', b'cmd', b'urlmon', b'http', b'javascript']:
-                    if pattern in data:
-                        found.append(pattern.decode())
-                if found:
-                    log_append(f"[위험] 위험 문자열 탐지됨")
-                    history_append(f"{file_name}")
-                    for s in found:
-                        history_append(f"  └ 탐지: {s}")
-                else:
-                    log_append("[안전] 위험 문자열 없음")
-            else:
-                log_append("[오류] 지원되지 않는 파일 형식")
-
-        except Exception as e:
-            log_append(f"[오류] 처리 중 오류 발생: {str(e)}")
-
-    log_append("=== 룰 기반 스캔 완료 ===")
+    # 즉시 AI 검사 실행
+    ai_scan_threats()
 
 
 def ai_scan_threats():
     """AI 모델 + 룰 기반 + VirusTotal 통합 탐지"""
-    if not target_files:
+    if not uploaded_files:
         messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
         return
 
@@ -214,8 +132,10 @@ def ai_scan_threats():
     progress_window.title("통합 악성코드 탐지 진행 중...")
     progress_window.geometry("400x120")
     progress_window.resizable(False, False)
+    progress_window.configure(bg=APP_BG_COLOR)
 
-    progress_label = tk.Label(progress_window, text="AI + 룰 기반 + VirusTotal 통합 스캔 중...")
+    progress_label = tk.Label(progress_window, text="AI + 룰 기반 + VirusTotal 통합 스캔 중...",
+                              bg=APP_BG_COLOR, fg=TEXT_FG_COLOR)
     progress_label.pack(pady=10)
 
     progress_bar = ttk.Progressbar(progress_window, mode='indeterminate')
@@ -238,9 +158,9 @@ def ai_scan_threats():
                 log_text.insert(tk.END, "VirusTotal API 비활성화 (의심 파일만 AI+룰 기반 검사)\n")
             log_text.insert(tk.END, "=" * 50 + "\n")
 
-            for i, file_path in enumerate(target_files):
+            for i, file_path in enumerate(uploaded_files):
                 file_name = os.path.basename(file_path)
-                log_text.insert(tk.END, f"\n[{i + 1}/{len(target_files)}] 1차 분석: {file_name}\n")
+                log_text.insert(tk.END, f"\n[{i + 1}/{len(uploaded_files)}] 1차 분석: {file_name}\n")
                 root.update()
 
                 is_suspicious = False
@@ -372,7 +292,6 @@ def ai_scan_threats():
                 root.update()
 
                 if is_suspicious and virustotal_available:
-                    import time
                     time.sleep(1)
 
             log_text.insert(tk.END, "\n=== 통합 스캔 완료 ===\n")
@@ -388,77 +307,15 @@ def ai_scan_threats():
     thread.start()
 
 
-def virustotal_scan():
-    """VirusTotal을 이용한 파일 검사"""
-    if not target_files:
-        messagebox.showwarning("경고", "먼저 검사할 파일을 선택하세요.")
-        return
-
-    if not virustotal_checker.is_available():
-        messagebox.showerror("오류", "VirusTotal API 키가 설정되지 않았습니다.\n.env 파일에 VIRUSTOTAL_API_KEY를 설정해주세요.")
-        return
-
-    progress_window = tk.Toplevel(root)
-    progress_window.title("VirusTotal 검사 중...")
-    progress_window.geometry("450x120")
-    progress_window.resizable(False, False)
-
-    progress_label = tk.Label(progress_window, text="VirusTotal에서 파일을 검사하고 있습니다...")
-    progress_label.pack(pady=10)
-
-    progress_bar = ttk.Progressbar(progress_window, mode='indeterminate')
-    progress_bar.pack(pady=10, padx=20, fill='x')
-    progress_bar.start()
-
-    def scan_thread():
-        try:
-            log_append("=== VirusTotal 검사 시작 ===")
-
-            for i, file_path in enumerate(target_files):
-                file_name = os.path.basename(file_path)
-                log_append(f"[{i + 1}/{len(target_files)}] VirusTotal 검사 중: {file_name}")
-
-                result = virustotal_checker.comprehensive_check(file_path)
-                vt_message = virustotal_checker.format_result_message(result)
-
-                log_append(f"  └ {vt_message}")
-
-                if "error" not in result:
-                    verdict = result.get("verdict", "알 수 없음")
-
-                    if verdict == "악성":
-                        history_append(f"{file_name} (VirusTotal: 악성 탐지)")
-                        malicious = result.get("malicious", 0)
-                        total = result.get("total_engines", 0)
-                        history_append(f"  └ 탐지 엔진: {malicious}/{total}")
-
-                    elif verdict == "의심":
-                        history_append(f"{file_name} (VirusTotal: 의심스러움)")
-
-                if i < len(target_files) - 1:
-                    time.sleep(1)
-
-            log_append("=== VirusTotal 검사 완료 ===")
-
-        except Exception as e:
-            log_append(f"[오류] VirusTotal 검사 중 오류: {str(e)}")
-        finally:
-            progress_bar.stop()
-            progress_window.destroy()
-
-    thread = threading.Thread(target=scan_thread)
-    thread.daemon = True
-    thread.start()
-
-
 def start_sanitization():
-    if not target_files:
+    """문서 무해화 및 clean 폴더에 저장"""
+    if not uploaded_files:
         messagebox.showwarning("경고", "먼저 무해화할 파일을 선택하세요.")
         return
 
     log_append("=== 문서 무해화 시작 ===")
 
-    for file_path in target_files:
+    for file_path in uploaded_files:
         ext = os.path.splitext(file_path)[1].lower()
         file_name = os.path.basename(file_path)
 
@@ -500,7 +357,7 @@ def start_sanitization():
             log_append(f"[오류] 처리 중 오류 발생: {str(e)}")
 
     log_append("=== 무해화 완료 ===")
-    messagebox.showinfo("완료", "문서 무해화가 완료되었습니다!\n정리된 파일은 sample/clear 폴더에 저장되었습니다.")
+    messagebox.showinfo("완료", "문서 무해화가 완료되었습니다!\n정리된 파일은 sample/clean 폴더에 저장되었습니다.")
 
 
 def train_model():
@@ -515,8 +372,10 @@ def train_model():
     progress_window.title("모델 훈련 중...")
     progress_window.geometry("400x150")
     progress_window.resizable(False, False)
+    progress_window.configure(bg=APP_BG_COLOR)
 
-    progress_label = tk.Label(progress_window, text="AI 모델을 훈련하고 있습니다...\n잠시만 기다려주세요.")
+    progress_label = tk.Label(progress_window, text="AI 모델을 훈련하고 있습니다...\n잠시만 기다려주세요.",
+                              bg=APP_BG_COLOR, fg=TEXT_FG_COLOR)
     progress_label.pack(pady=20)
 
     progress_bar = ttk.Progressbar(progress_window, mode='indeterminate')
@@ -547,9 +406,12 @@ def train_model():
     thread.daemon = True
     thread.start()
 
+
 def retrain_model_remotely():
+    """원격 서버에서 모델 재훈련"""
     try:
-        response = requests.post("http://localhost:8000/train", timeout=600)
+        response = requests.post(f"{config.SERVER_URL}/train", timeout=600)
+
         if response.status_code == 200:
             data = response.json()
             messagebox.showinfo("재훈련 완료", f"""
@@ -567,6 +429,7 @@ def retrain_model_remotely():
 
 
 def show_model_info():
+    """모델 정보 표시"""
     info_text = ""
 
     if config.USE_AWS:
@@ -600,13 +463,28 @@ S3 모델 크기: {s3_info['size_mb']} MB
     messagebox.showinfo("AI 모델 정보", info_text)
 
 
-
-
 # GUI 구성
 root = tk.Tk()
 root.title("문서형 악성코드 무해화 시스템 v2.2")
 root.geometry("1200x800")
 root.resizable(False, False)
+
+# 색상 상수
+APP_BG_COLOR = "#303030"
+TEXT_AREA_BG_COLOR = "#252525"
+TEXT_FG_COLOR = "#E0E0E0"
+CURSOR_COLOR = "#FFFFFF"
+SCROLLBAR_TROUGH_COLOR = APP_BG_COLOR
+SCROLLBAR_BG_COLOR = "#505050"
+
+root.configure(bg=APP_BG_COLOR)
+
+style = ttk.Style()
+style.configure("Dark.Vertical.TScrollbar",
+                background=SCROLLBAR_BG_COLOR,
+                troughcolor=SCROLLBAR_TROUGH_COLOR,
+                arrowcolor=TEXT_FG_COLOR,
+                relief=tk.FLAT)
 
 # Notebook(탭) 생성
 notebook = ttk.Notebook(root)
@@ -620,62 +498,34 @@ notebook.add(tab_proc, text="무해화 처리")
 tab_model = ttk.Frame(notebook)
 notebook.add(tab_model, text="모델 정보")
 
-# ───── 탭 ① : 무해화 처리 UI ─────
-# (기존 위젯들을 tab_proc 안에 배치)
+# 탭 프레임 배경색 설정
+tab_proc.configure(style='Dark.TFrame')
+tab_model.configure(style='Dark.TFrame')
 
-# 색상 상수
-APP_BG_COLOR = "#303030"
-TEXT_AREA_BG_COLOR = "#252525"
-TEXT_FG_COLOR = "#E0E0E0"
-CURSOR_COLOR = "#FFFFFF"
-SCROLLBAR_TROUGH_COLOR = APP_BG_COLOR
-SCROLLBAR_BG_COLOR = "#505050"
-
-style = ttk.Style()
-style.configure("Dark.Vertical.TScrollbar",
-                background=SCROLLBAR_BG_COLOR,
-                troughcolor=SCROLLBAR_TROUGH_COLOR,
-                arrowcolor=TEXT_FG_COLOR,
-                relief=tk.FLAT)
-
-# 상단 파일 리스트
-top_frame = tk.Frame(tab_proc)
+# 상단 파일 리스트 (단순화)
+top_frame = tk.Frame(tab_proc, bg=APP_BG_COLOR)
 top_frame.pack(pady=15)
 
-left_frame = tk.Frame(top_frame)
-left_frame.pack(side=tk.LEFT, padx=20)
+file_frame = tk.Frame(top_frame, bg=APP_BG_COLOR)
+file_frame.pack()
 
-tk.Label(left_frame, text="업로드된 문서").pack()
-left_listbox = tk.Listbox(left_frame, width=40, height=15)
-left_listbox.pack()
-
-center_frame = tk.Frame(top_frame)
-center_frame.pack(side=tk.LEFT, padx=10)
-
-tk.Button(center_frame, text="→", width=5, command=lambda: move_to_target()).pack(pady=10)
-
-right_frame = tk.Frame(top_frame)
-right_frame.pack(side=tk.LEFT, padx=20)
-
-tk.Label(right_frame, text="분석/무해화 대상 문서").pack()
-right_listbox = tk.Listbox(right_frame, width=40, height=15)
-right_listbox.pack()
+tk.Label(file_frame, text="업로드된 문서", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR).pack()
+file_listbox = tk.Listbox(file_frame, width=80, height=15, bg=TEXT_AREA_BG_COLOR, fg=TEXT_FG_COLOR)
+file_listbox.pack()
 
 # 중단 버튼들
-button_frame = tk.Frame(tab_proc)
+button_frame = tk.Frame(tab_proc, bg=APP_BG_COLOR)
 button_frame.pack(pady=10)
 
-ai_scan_button = tk.Button(button_frame, text="악성코드 검사", width=15, command=ai_scan_threats,
+ai_scan_button = tk.Button(button_frame, text="문서 업로드 및 검사", width=20, command=upload_and_scan_files,
                            bg="#4CAF50", fg="black")
-
-tk.Button(button_frame, text="문서 업로드", width=15, command=upload_files).pack(side=tk.LEFT, padx=5)
 ai_scan_button.pack(side=tk.LEFT, padx=5)
 
-tk.Button(button_frame, text="무해화 및 저장", width=15, command=start_sanitization).pack(side=tk.LEFT, padx=5)
+tk.Button(button_frame, text="무해화 및 저장", width=15, command=start_sanitization,
+          bg="#2196F3", fg="black").pack(side=tk.LEFT, padx=5)
 
-# 로그 초기화 버튼
-btn_clear = tk.Button(button_frame, text="로그 초기화", bg="#FF6B6B", command=clear_logs)
-btn_clear.pack(side=tk.LEFT, padx=5)  # ← 다른 버튼들과 동일하게 pack 사용
+btn_clear = tk.Button(button_frame, text="로그 초기화", width=12, bg="#FF6B6B", fg="black", command=clear_logs)
+btn_clear.pack(side=tk.LEFT, padx=5)
 
 # 로그 영역
 log_label = tk.Label(tab_proc, text="시스템 로그", bg=APP_BG_COLOR, fg=TEXT_FG_COLOR)
@@ -707,17 +557,19 @@ history_text.configure(yscrollcommand=history_scrollbar.set)
 history_text.pack(side="left", fill=tk.BOTH, expand=True)
 history_scrollbar.pack(side="right", fill="y")
 
-# ───── 탭 ② : 모델 정보 UI ─────
-status_frame = tk.Frame(tab_model)
+# 탭 ② : 모델 정보 UI
+status_frame = tk.Frame(tab_model, bg=APP_BG_COLOR)
 status_frame.pack(pady=20)
 
-btn_info     = tk.Button(status_frame, text="모델 정보", command=show_model_info)
-btn_retrain  = tk.Button(status_frame, text="모델 재훈련", command=retrain_model_remotely)
+btn_info = tk.Button(status_frame, text="모델 정보", command=show_model_info,
+                     bg="#607D8B", fg="white")
+btn_retrain = tk.Button(status_frame, text="모델 재훈련", command=retrain_model_remotely,
+                        bg="#FF9800", fg="white")
 
 btn_info.grid(row=0, column=0, padx=10)
 btn_retrain.grid(row=0, column=1, padx=10)
 
-# ────────────────────── 기타 초기화 ─────────────────────
+# 초기화
 root.after(500, lambda: log_append("문서형 악성코드 무해화 시스템 v2.2 시작"))
 root.after(1000, lambda: update_model_status())
 

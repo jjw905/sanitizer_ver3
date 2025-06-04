@@ -1,4 +1,4 @@
-# config.py - 개선된 버전
+# config.py - 최종 버전
 import os
 import os; from dotenv import load_dotenv
 load_dotenv()
@@ -16,6 +16,7 @@ RDS_PASSWORD    = os.getenv("RDS_PASSWORD")
 API_KEYS = {
     'malwarebazaar': os.getenv('MALWARE_BAZAAR_API_KEY'),
     'triage': os.getenv('TRIAGE_API_KEY'),
+    'virustotal': os.getenv('VIRUSTOTAL_API_KEY'),
 }
 
 # API 엔드포인트 설정
@@ -31,15 +32,24 @@ SAMPLE_LIMITS = {
     'total_malware_target': 300,
     'total_clean_target': 300,
     'minimum_per_type': 40,
-    'pdf_target': 80,             # PDF 샘플 증가
-    'word_target': 80,            # Word 샘플 증가
-    'excel_target': 60,           # Excel 샘플 증가
-    'powerpoint_target': 50,      # PowerPoint 샘플 증가
-    'hwp_target': 50,             # HWP 샘플 확보
-    'rtf_target': 30,             # RTF 샘플 추가
+    'pdf_target': 80,
+    'word_target': 80,
+    'excel_target': 60,
+    'powerpoint_target': 50,
+    'hwp_target': 50,
+    'rtf_target': 30,
 }
 
-# 악성코드 분류 매핑 (백신 스타일)
+# 디렉토리 설정
+DIRECTORIES = {
+    'malware_samples': 'sample/mecro',
+    'clean_samples': 'sample/clear',      # 자체생성 클린파일
+    'sanitized_output': 'sample/clean',   # 무해화된 파일
+    'models': 'models',
+    'temp': 'temp'
+}
+
+# 악성코드 분류 매핑
 MALWARE_CLASSIFICATIONS = {
     'emotet': {
         'family': 'Trojan.Emotet',
@@ -103,9 +113,9 @@ MALWARE_CLASSIFICATIONS = {
     }
 }
 
-# 훈련 데이터 충분성 기준 ( 각 300개 이상 )
+# 훈련 데이터 충분성 기준
 DATA_SUFFICIENCY = {
-    'minimum_total_samples': 600,   # 총 600개 (악성 300 + 정상 300)
+    'minimum_total_samples': 600,
     'minimum_malware_samples': 300,
     'minimum_clean_samples': 300,
     'minimum_per_file_type': 40,
@@ -126,3 +136,24 @@ TRIAGE_CONFIG = {
     ]
 }
 
+# 지원 파일 형식
+SUPPORTED_FORMATS = {
+    'office': ['.docx', '.docm', '.xlsx', '.xlsm', '.pptx', '.pptm'],
+    'pdf': ['.pdf'],
+    'hwp': ['.hwp', '.hwpx', '.hwpml'],
+    'all': ['.docx', '.docm', '.xlsx', '.xlsm', '.pptx', '.pptm', '.pdf', '.hwp', '.hwpx', '.hwpml']
+}
+
+# 서버 연결 설정
+SERVER_HOST = os.getenv("SERVER_HOST", "localhost")
+SERVER_PORT = os.getenv("SERVER_PORT", "8000")
+SERVER_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
+
+# 디렉토리 자동 생성
+def ensure_directories():
+    """필요한 디렉토리들을 자동으로 생성"""
+    for dir_path in DIRECTORIES.values():
+        os.makedirs(dir_path, exist_ok=True)
+
+# 초기화 시 디렉토리 생성
+ensure_directories()

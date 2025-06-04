@@ -1,8 +1,9 @@
-# utils/model_trainer.py - 개선된 버전 (증분 학습 지원)
+# utils/model_trainer.py - 최종 버전 (DB 연동)
 
 import os
 import pickle
 import numpy as np
+import hashlib
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split, cross_val_score
@@ -11,8 +12,10 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 from sklearn.ensemble import VotingClassifier
 import pandas as pd
 from utils.feature_extractor import FeatureExtractor
-from sqlalchemy import text          
+from sqlalchemy import text
 from utils import db
+from utils import aws_helper
+import config
 
 
 class ModelTrainer:
@@ -27,60 +30,127 @@ class ModelTrainer:
         # 모델 디렉토리 생성
         os.makedirs("models", exist_ok=True)
 
-    def prepare_training_data(self, malware_dir: str = "sample/mecro",
-                              clean_dir: str = "sample/clear") -> tuple:
-        """훈련 데이터 준비 (지원 형식만)"""
+    def prepare_training_data(self, malware_dir: str = None,
+                              clean_dir: str = None, use_db: bool = True) -> tuple:
+        """훈련 데이터 준비 (DB 연동 포함)"""
         print("=== 훈련 데이터 준비 중 ===")
+
+        # 기본 디렉토리 설정
+        if malware_dir is None:
+            malware_dir = config.DIRECTORIES['malware_samples']
+        if clean_dir is None:
+            clean_dir = config.DIRECTORIES['clean_samples']
 
         # 지원 확장자 정의
         supported_extensions = {'.hwp', '.hwpx', '.docx', '.docm', '.pdf', '.pptx', '.pptm', '.xlsx', '.xlsm'}
 
-        # 악성 파일 목록 (지원 형식만)
-        malware_files = []
+        all_files = []
+        all_labels = []
+
+        # 로컬 파일들 수집
+        local_malware_files = []
+        local_clean_files = []
+
         if os.path.exists(malware_dir):
             for f in os.listdir(malware_dir):
                 file_path = os.path.join(malware_dir, f)
                 if (os.path.isfile(file_path) and
                         os.path.splitext(f)[1].lower() in supported_extensions):
-                    malware_files.append(file_path)
+                    local_malware_files.append(file_path)
 
-        # 정상 파일 목록 (지원 형식만)
-        clean_files = []
         if os.path.exists(clean_dir):
             for f in os.listdir(clean_dir):
                 file_path = os.path.join(clean_dir, f)
                 if (os.path.isfile(file_path) and
                         os.path.splitext(f)[1].lower() in supported_extensions):
-                    clean_files.append(file_path)
+                    local_clean_files.append(file_path)
 
-        print(f"악성 파일: {len(malware_files)}개 (지원 형식만)")
-        print(f"정상 파일: {len(clean_files)}개 (지원 형식만)")
+        print(f"로컬 악성 파일: {len(local_malware_files)}개")
+        print(f"로컬 정상 파일: {len(local_clean_files)}개")
 
-        if len(malware_files) < 5 or len(clean_files) < 5:
-            print("⚠️  훈련 데이터가 부족합니다. 각각 최소 5개 이상 필요합니다.")
+        # 로컬 파일들을 DB와 S3에 동기화
+        if use_db and config.USE_AWS:
+            self._sync_local_files_to_db(local_malware_files, is_malicious=True)
+            self._sync_local_files_to_db(local_clean_files, is_malicious=False)
+
+        # DB에서 추가 훈련 데이터 가져오기
+        if use_db:
+            db_samples = self._load_training_data_from_db()
+            print(f"DB에서 로드된 샘플: {len(db_samples)}개")
+
+            # DB 샘플들을 로컬로 다운로드 (필요시)
+            for sample in db_samples:
+                if sample.s3_key and config.USE_AWS:
+                    local_path = os.path.join("temp_db_samples", os.path.basename(sample.file_name))
+                    os.makedirs("temp_db_samples", exist_ok=True)
+
+                    if aws_helper.download_virus_sample(sample.s3_key, local_path):
+                        if sample.is_malicious:
+                            local_malware_files.append(local_path)
+                        else:
+                            local_clean_files.append(local_path)
+
+        all_files = local_malware_files + local_clean_files
+        all_labels = [1] * len(local_malware_files) + [0] * len(local_clean_files)
+
+        print(f"최종 훈련 데이터: 악성 {len(local_malware_files)}개, 정상 {len(local_clean_files)}개")
+
+        if len(local_malware_files) < 5 or len(local_clean_files) < 5:
+            print("훈련 데이터가 부족합니다. 각각 최소 5개 이상 필요합니다.")
             return None, None
 
         # 특징 추출
         print("특징 추출 중...")
-
-        all_files = malware_files + clean_files
         features = self.feature_extractor.extract_features_batch(all_files)
-
-        # 라벨 생성 (1: 악성, 0: 정상)
-        labels = np.array([1] * len(malware_files) + [0] * len(clean_files))
+        labels = np.array(all_labels)
 
         print(f"특징 벡터 크기: {features.shape}")
         print(f"라벨 분포 - 악성: {np.sum(labels)}, 정상: {len(labels) - np.sum(labels)}")
 
         return features, labels
 
-    def save_training_history(
-        self,
-        features,
-        labels,
-        accuracy: float,             # ⬅ accuracy 인자 추가
-        model_version: str = "1.0"
-    ):
+    def _sync_local_files_to_db(self, file_paths, is_malicious):
+        """로컬 파일들을 DB에 동기화"""
+        for file_path in file_paths:
+            try:
+                # 파일 해시 계산
+                with open(file_path, 'rb') as f:
+                    file_hash = hashlib.sha256(f.read()).hexdigest()
+
+                # 특징 추출
+                features = self.feature_extractor.extract_file_features(file_path)
+                features_json = str(features)  # 간단한 JSON 변환
+
+                # S3 업로드
+                s3_key = None
+                if config.USE_AWS:
+                    s3_key = aws_helper.upload_virus_sample(file_path, file_hash)
+
+                # DB 저장
+                db.save_virus_sample(
+                    file_path=file_path,
+                    file_hash=file_hash,
+                    is_malicious=is_malicious,
+                    source="local_sync",
+                    malware_family=features.get('malware_family'),
+                    threat_category=features.get('threat_category'),
+                    s3_key=s3_key,
+                    features_json=features_json
+                )
+
+            except Exception as e:
+                print(f"파일 동기화 실패 {file_path}: {e}")
+
+    def _load_training_data_from_db(self):
+        """DB에서 훈련 데이터 로드"""
+        try:
+            samples = db.get_training_samples(limit=1000)  # 최대 1000개 제한
+            return samples
+        except Exception as e:
+            print(f"DB 데이터 로드 실패: {e}")
+            return []
+
+    def save_training_history(self, features, labels, accuracy: float, model_version: str = "1.0"):
         """훈련 기록을 RDS + 로컬 파일에 저장"""
         try:
             history_data = {
@@ -92,26 +162,26 @@ class ModelTrainer:
                 "accuracy": accuracy
             }
 
-            # ─── 1) RDS INSERT ──────────────────────────
-            if db.engine:                            # ← RDS 연결이 있을 때만
+            # RDS INSERT
+            if db.engine:
                 with db.engine.begin() as conn:
                     conn.execute(
                         text(
                             "INSERT INTO training_history "
-                            "(model_ver, sample_count, accuracy) "
-                            "VALUES (:v, :c, :a)"
+                            "(model_ver, sample_count, accuracy, trained_at) "
+                            "VALUES (:v, :c, :a, NOW())"
                         ),
                         {"v": model_version, "c": len(features), "a": accuracy}
                     )
 
-            # ─── 2) 로컬 history 파일 (증분 학습용) ───────
+            # 로컬 history 파일
             with open(self.training_history_path, "wb") as f:
                 pickle.dump(history_data, f)
 
-            print(f"✅ 훈련 기록 저장 완료: {len(features)}개 샘플, acc={accuracy:.3f}")
+            print(f"훈련 기록 저장 완료: {len(features)}개 샘플, acc={accuracy:.3f}")
 
         except Exception as e:
-            print(f"❌ 훈련 기록 저장 실패: {e}")
+            print(f"훈련 기록 저장 실패: {e}")
 
     def load_training_history(self):
         """이전 훈련 기록 로드"""
@@ -120,7 +190,7 @@ class ModelTrainer:
                 with open(self.training_history_path, 'rb') as f:
                     history_data = pickle.load(f)
 
-                print(f"✅ 이전 훈련 기록 로드: {history_data['sample_count']}개 샘플")
+                print(f"이전 훈련 기록 로드: {history_data['sample_count']}개 샘플")
                 print(f"   버전: {history_data['model_version']}")
                 print(f"   훈련일: {history_data['training_date']}")
 
@@ -130,17 +200,17 @@ class ModelTrainer:
                 return None, None
 
         except Exception as e:
-            print(f"❌ 훈련 기록 로드 실패: {e}")
+            print(f"훈련 기록 로드 실패: {e}")
             return None, None
 
     def incremental_train_model(self, test_size=0.2):
         """증분 학습 (기존 데이터 + 새 데이터)"""
         print("=== 모델 증분 학습 시작 ===")
 
-        # 새로운 데이터 준비
-        new_features, new_labels = self.prepare_training_data()
+        # 새로운 데이터 준비 (DB 포함)
+        new_features, new_labels = self.prepare_training_data(use_db=True)
         if new_features is None:
-            print("❌ 새로운 훈련 데이터 준비 실패")
+            print("새로운 훈련 데이터 준비 실패")
             return False
 
         # 이전 훈련 데이터 로드
@@ -149,11 +219,9 @@ class ModelTrainer:
         if old_features is not None and old_labels is not None:
             print("기존 데이터와 새 데이터를 결합합니다...")
 
-            # 데이터 결합
             try:
-                # 특징 수가 다를 수 있으므로 확인
                 if old_features.shape[1] != new_features.shape[1]:
-                    print(f"⚠️  특징 수가 다릅니다. 기존: {old_features.shape[1]}, 새로운: {new_features.shape[1]}")
+                    print(f"특징 수가 다릅니다. 기존: {old_features.shape[1]}, 새로운: {new_features.shape[1]}")
                     print("기존 데이터를 무시하고 새 데이터로만 훈련합니다.")
                     combined_features = new_features
                     combined_labels = new_labels
@@ -180,18 +248,18 @@ class ModelTrainer:
 
         if success:
             # 새로운 훈련 기록 저장
-            self.save_training_history(combined_features, combined_labels, "2.0+", ensemble_accuracy, "2.0+")
+            self.save_training_history(combined_features, combined_labels, ensemble_accuracy, "2.0+")
 
         return success
 
     def train_model(self, test_size=0.2):
-        """전체 모델 훈련 (처음부터)"""
+        """전체 모델 훈련 (처음부터, DB 포함)"""
         print("=== 모델 전체 훈련 시작 ===")
 
-        # 데이터 준비
-        features, labels = self.prepare_training_data()
+        # 데이터 준비 (DB 포함)
+        features, labels = self.prepare_training_data(use_db=True)
         if features is None:
-            print("❌ 훈련 데이터 준비 실패")
+            print("훈련 데이터 준비 실패")
             return False
 
         # 모델 훈련
@@ -248,12 +316,34 @@ class ModelTrainer:
                 clean_count=int(len(labels) - np.sum(labels)),
                 model_version="2.2"
             )
-            print("✅ 모델 훈련 완료!")
+
+            # AWS에 업로드
+            if config.USE_AWS:
+                self._upload_to_aws()
+
+            print("모델 훈련 완료!")
             return True, ensemble_accuracy
 
         except Exception as e:
-            print(f"❌ 모델 훈련 실패: {e}")
+            print(f"모델 훈련 실패: {e}")
             return False, None
+
+    def _upload_to_aws(self):
+        """훈련된 모델을 AWS에 업로드"""
+        try:
+            upload_files = [
+                (self.model_path, "models/ensemble_model.pkl"),
+                (self.scaler_path, "models/scaler.pkl"),
+                ("models/model_meta.json", "models/model_meta.json")
+            ]
+
+            for local_path, s3_key in upload_files:
+                if os.path.exists(local_path):
+                    aws_helper.upload(local_path, s3_key)
+
+            print("AWS 업로드 완료")
+        except Exception as e:
+            print(f"AWS 업로드 실패: {e}")
 
     def train_individual_models(self, X_train, X_test, y_train, y_test):
         """개별 모델 훈련 및 평가"""
@@ -296,7 +386,7 @@ class ModelTrainer:
             y_pred = model.predict(X_test)
             accuracy = accuracy_score(y_test, y_pred)
 
-            # 교차 검증 (샘플이 적을 경우 cv=3)
+            # 교차 검증
             cv_folds = min(3, len(np.unique(y_train)))
             if cv_folds > 1:
                 cv_scores = cross_val_score(model, X_train, y_train, cv=cv_folds, scoring='accuracy')
@@ -319,14 +409,13 @@ class ModelTrainer:
         """앙상블 모델 생성"""
         print("\n=== 앙상블 모델 생성 ===")
 
-        # 보팅 분류기 생성
         voting_clf = VotingClassifier(
             estimators=[
                 ('rf', trained_models['RandomForest']),
                 ('gb', trained_models['GradientBoosting']),
                 ('svm', trained_models['SVM'])
             ],
-            voting='soft'  # 확률 기반 투표
+            voting='soft'
         )
 
         return voting_clf
@@ -334,36 +423,32 @@ class ModelTrainer:
     def save_model(self):
         """모델과 스케일러 저장"""
         try:
-            # 앙상블 모델 저장
             with open(self.model_path, 'wb') as f:
                 pickle.dump(self.ensemble_model, f)
 
-            # 스케일러 저장
             with open(self.scaler_path, 'wb') as f:
                 pickle.dump(self.scaler, f)
 
-            print(f"✅ 모델 저장 완료: {self.model_path}")
-            print(f"✅ 스케일러 저장 완료: {self.scaler_path}")
+            print(f"모델 저장 완료: {self.model_path}")
+            print(f"스케일러 저장 완료: {self.scaler_path}")
 
         except Exception as e:
-            print(f"❌ 모델 저장 실패: {e}")
+            print(f"모델 저장 실패: {e}")
 
     def load_model(self):
         """저장된 모델과 스케일러 로드"""
         try:
-            # 앙상블 모델 로드
             with open(self.model_path, 'rb') as f:
                 self.ensemble_model = pickle.load(f)
 
-            # 스케일러 로드
             with open(self.scaler_path, 'rb') as f:
                 self.scaler = pickle.load(f)
 
-            print("✅ 모델 로드 완료")
+            print("모델 로드 완료")
             return True
 
         except Exception as e:
-            print(f"❌ 모델 로드 실패: {e}")
+            print(f"모델 로드 실패: {e}")
             return False
 
     def predict(self, file_path: str) -> dict:
@@ -424,13 +509,13 @@ class ModelTrainer:
         """모델 성능 평가"""
         if self.ensemble_model is None:
             if not self.load_model():
-                print("❌ 모델을 로드할 수 없습니다")
+                print("모델을 로드할 수 없습니다")
                 return
 
         # 테스트 데이터로 재평가
-        features, labels = self.prepare_training_data()
+        features, labels = self.prepare_training_data(use_db=True)
         if features is None:
-            print("❌ 평가 데이터가 없습니다")
+            print("평가 데이터가 없습니다")
             return
 
         # 정규화
@@ -449,29 +534,6 @@ class ModelTrainer:
         print(classification_report(labels, predictions, target_names=['정상', '악성']))
         print(f"\n혼동 행렬:\n{confusion_matrix(labels, predictions)}")
 
-        # 개별 파일 예측 결과 (일부만)
-        print("\n=== 샘플 예측 결과 ===")
-
-        # 악성 파일 테스트
-        if os.path.exists("sample/mecro"):
-            malware_files = [f for f in os.listdir("sample/mecro")
-                             if os.path.isfile(os.path.join("sample/mecro", f))][:3]
-            for file_name in malware_files:
-                file_path = os.path.join("sample/mecro", file_name)
-                result = self.predict(file_path)
-                print(
-                    f"악성 파일 {file_name}: {result.get('prediction', 'Error')} (신뢰도: {result.get('confidence', 0):.3f})")
-
-        # 정상 파일 테스트
-        if os.path.exists("sample/clear"):
-            clean_files = [f for f in os.listdir("sample/clear")
-                           if os.path.isfile(os.path.join("sample/clear", f))][:3]
-            for file_name in clean_files:
-                file_path = os.path.join("sample/clear", file_name)
-                result = self.predict(file_path)
-                print(
-                    f"정상 파일 {file_name}: {result.get('prediction', 'Error')} (신뢰도: {result.get('confidence', 0):.3f})")
-
     def save_model_metadata(self, accuracy: float, malware_count: int, clean_count: int, model_version="1.0"):
         import json
         from datetime import datetime
@@ -488,11 +550,11 @@ class ModelTrainer:
         with open("models/model_meta.json", "w") as f:
             json.dump(meta, f)
 
-        print("✅ model_meta.json 저장 완료")
+        print("model_meta.json 저장 완료")
 
 
 def train_model():
-    """모델 훈련 실행 함수"""
+    """모델 훈련 실행 함수 (DB 연동)"""
     trainer = ModelTrainer()
 
     # 훈련 데이터 확인
@@ -503,57 +565,37 @@ def train_model():
         malware_count = len([f for f in os.listdir("sample/mecro")
                              if os.path.isfile(os.path.join("sample/mecro", f))])
 
-    if os.path.exists("sample/clear"):
-        clean_count = len([f for f in os.listdir("sample/clear")
-                           if os.path.isfile(os.path.join("sample/clear", f))])
+    if os.path.exists(config.DIRECTORIES['clean_samples']):
+        clean_count = len([f for f in os.listdir(config.DIRECTORIES['clean_samples'])
+                           if os.path.isfile(os.path.join(config.DIRECTORIES['clean_samples'], f))])
 
     print(f"현재 데이터: 악성 {malware_count}개, 정상 {clean_count}개")
 
-    if malware_count < 10 or clean_count < 10:
-        print("⚠️  훈련 데이터가 부족합니다. 데이터 수집을 시작합니다...")
+    # DB 통계도 확인
+    try:
+        db_stats = db.get_sample_statistics()
+        print(f"DB 데이터: 악성 {db_stats.get('malicious_samples', 0)}개, 정상 {db_stats.get('clean_samples', 0)}개")
+    except:
+        print("DB 연결 없음")
+
+    if malware_count + clean_count < 20:
+        print("훈련 데이터가 부족합니다. 데이터 수집을 시작합니다...")
         try:
             from utils.api_client import collect_training_data
             collect_training_data(malware_count=15, clean_count=15)
         except Exception as e:
-            print(f"❌ 데이터 수집 실패: {e}")
+            print(f"데이터 수집 실패: {e}")
             print("수동으로 sample/mecro와 sample/clear 폴더에 파일을 추가해주세요.")
             return False
 
-    # 모델 훈련 (전체 학습)
+    # 모델 훈련 (전체 학습, DB 포함)
     success = trainer.train_model()
 
     if success:
-        # 모델 평가
         trainer.evaluate_model()
 
     return success
 
-
-def update_model():
-    """모델 업데이트 (증분 학습)"""
-    trainer = ModelTrainer()
-
-    print("=== 모델 업데이트 (증분 학습) ===")
-
-    # 증분 학습 실행
-    success = trainer.incremental_train_model()
-
-    if success:
-        print("✅ 모델 업데이트 완료!")
-        # 모델 평가
-        trainer.evaluate_model()
-    else:
-        print("❌ 모델 업데이트 실패")
-
-    return success
 
 if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "update":
-            update_model()
-        else:
-            train_model()
-    else:
-        train_model()
+    train_model()

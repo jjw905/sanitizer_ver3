@@ -4,6 +4,7 @@ import time
 import hashlib
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
+import config
 
 load_dotenv()
 
@@ -63,11 +64,11 @@ class APIClient:
 
             # Office 및 HWP 문서 타입만 분류
             document_types = {
-                'word': [],      # doc, docx
-                'excel': [],     # xls, xlsx
-                'powerpoint': [],# ppt, pptx
-                'hwp': [],       # hwp, hwpx, hwpml
-                'general': []    # 기타 Office 문서
+                'word': [],
+                'excel': [],
+                'powerpoint': [],
+                'hwp': [],
+                'general': []
             }
 
             print("Office 및 HWP 문서 샘플 수집 시작...")
@@ -96,7 +97,7 @@ class APIClient:
 
             for doc_type, tags in office_tags.items():
                 for tag in tags:
-                    if len(all_samples) >= 5000:  # 최대 5000개로 제한
+                    if len(all_samples) >= 5000:
                         break
 
                     try:
@@ -119,7 +120,7 @@ class APIClient:
                                         all_samples.append(sample)
                                         existing_hashes.add(hash_val)
 
-                        time.sleep(0.5)  # API 제한 대응
+                        time.sleep(0.5)
 
                     except Exception as tag_error:
                         print(f"'{tag}' 태그 검색 실패: {tag_error}")
@@ -181,7 +182,6 @@ class APIClient:
                     elif not classified:
                         office_signatures = ['emotet', 'trickbot', 'qakbot', 'formbook', 'agent tesla', 'lokibot']
                         if any(sig in signature_lower for sig in office_signatures):
-                            # 파일명으로 Office 문서임을 추정
                             office_patterns = ['invoice', 'document', 'report', 'statement', 'order', 'contract']
                             if any(pattern in file_name_lower for pattern in office_patterns):
                                 document_types['general'].append(sample)
@@ -196,7 +196,7 @@ class APIClient:
                 print(f"  {doc_type.upper()}: {len(samples)}개")
 
             # 각 타입별로 균등하게 다운로드
-            target_per_type = max(50, count // 5)  # 5개 타입으로 나누기, 최소 50개씩
+            target_per_type = max(50, count // 5)
             selected_samples = []
 
             for doc_type, samples in document_types.items():
@@ -227,7 +227,7 @@ class APIClient:
                 print("다운로드할 문서 샘플이 없습니다")
                 return downloaded_files
 
-            os.makedirs("sample/mecro", exist_ok=True)
+            os.makedirs(config.DIRECTORIES['malware_samples'], exist_ok=True)
 
             # 샘플 다운로드
             for i, sample in enumerate(selected_samples):
@@ -269,7 +269,7 @@ class APIClient:
                             pass
 
                         # ZIP 파일 저장
-                        zip_path = os.path.join("sample/mecro", f"{safe_filename}.zip")
+                        zip_path = os.path.join(config.DIRECTORIES['malware_samples'], f"{safe_filename}.zip")
 
                         with open(zip_path, "wb") as f:
                             f.write(dl_response.content)
@@ -287,10 +287,10 @@ class APIClient:
                                 extracted_files = zip_ref.namelist()
 
                                 if extracted_files:
-                                    zip_ref.extractall("sample/mecro")
+                                    zip_ref.extractall(config.DIRECTORIES['malware_samples'])
 
-                                    old_path = os.path.join("sample/mecro", extracted_files[0])
-                                    new_path = os.path.join("sample/mecro", safe_filename)
+                                    old_path = os.path.join(config.DIRECTORIES['malware_samples'], extracted_files[0])
+                                    new_path = os.path.join(config.DIRECTORIES['malware_samples'], safe_filename)
 
                                     if os.path.exists(old_path):
                                         if os.path.exists(new_path):
@@ -317,10 +317,10 @@ class APIClient:
                                     extracted_files = zip_ref.namelist()
 
                                     if extracted_files:
-                                        zip_ref.extractall("sample/mecro")
+                                        zip_ref.extractall(config.DIRECTORIES['malware_samples'])
 
-                                        old_path = os.path.join("sample/mecro", extracted_files[0])
-                                        new_path = os.path.join("sample/mecro", safe_filename)
+                                        old_path = os.path.join(config.DIRECTORIES['malware_samples'], extracted_files[0])
+                                        new_path = os.path.join(config.DIRECTORIES['malware_samples'], safe_filename)
 
                                         if os.path.exists(old_path):
                                             if os.path.exists(new_path):
@@ -353,7 +353,7 @@ class APIClient:
                 except Exception as download_error:
                     print(f"  다운로드 오류: {download_error}")
 
-                time.sleep(2)  # API 제한 대응
+                time.sleep(2)
 
         except Exception as e:
             print(f"샘플 다운로드 중 전체 오류: {e}")
@@ -391,9 +391,9 @@ class APIClient:
         return downloaded_files
 
     def get_clean_samples(self, count: int = 500) -> List[str]:
-        """정상 문서 샘플 생성"""
+        """정상 문서 샘플 생성 (clear 폴더에 저장)"""
         clean_files = []
-        os.makedirs("sample/clear", exist_ok=True)
+        os.makedirs(config.DIRECTORIES['clean_samples'], exist_ok=True)
 
         try:
             from reportlab.pdfgen import canvas
@@ -401,11 +401,11 @@ class APIClient:
 
             # Office 문서 형식별로 더미 생성
             office_types = ['doc', 'xls', 'ppt']
-            per_type = count // 4  # 4개 타입으로 나누기
+            per_type = count // 4
 
             # PDF 생성
             for i in range(per_type):
-                file_path = f"sample/clear/clean_document_{i:03d}.pdf"
+                file_path = os.path.join(config.DIRECTORIES['clean_samples'], f"clean_document_{i:03d}.pdf")
                 c = canvas.Canvas(file_path, pagesize=letter)
                 c.drawString(100, 750, f"Clean Document #{i + 1}")
                 c.drawString(100, 730, "This is a normal, safe document.")
@@ -416,7 +416,7 @@ class APIClient:
             # 텍스트 파일로 Office 문서 시뮬레이션
             for office_type in office_types:
                 for i in range(per_type):
-                    file_path = f"sample/clear/clean_{office_type}_{i:03d}.txt"
+                    file_path = os.path.join(config.DIRECTORIES['clean_samples'], f"clean_{office_type}_{i:03d}.txt")
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(f"Clean {office_type.upper()} Document #{i + 1}\n")
                         f.write("This is a normal, safe document.\n")
@@ -427,7 +427,7 @@ class APIClient:
         except ImportError:
             # reportlab이 없으면 텍스트 파일로만 생성
             for i in range(count):
-                file_path = f"sample/clear/clean_document_{i:03d}.txt"
+                file_path = os.path.join(config.DIRECTORIES['clean_samples'], f"clean_document_{i:03d}.txt")
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(f"Clean Document #{i + 1}\n")
                     f.write("This is a normal, safe document.\n")

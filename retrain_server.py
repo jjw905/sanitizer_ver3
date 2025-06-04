@@ -1,4 +1,4 @@
-# retrain_server.py
+# retrain_server.py - 최종 버전
 from fastapi import FastAPI
 import subprocess
 from fastapi.responses import JSONResponse
@@ -29,3 +29,5 @@ def train_model():
 
     except subprocess.CalledProcessError:
         return JSONResponse(status_code=500, content={"status": "error", "message": "학습 실패"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
