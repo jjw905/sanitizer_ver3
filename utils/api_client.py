@@ -1,489 +1,788 @@
-import requests
+# main.py - 문서형 악성코드 무해화 시스템 GUI
+
 import os
+import sys
 import time
-import hashlib
-from typing import List, Dict, Optional
-from dotenv import load_dotenv
+import threading
+import subprocess
+import platform
+import customtkinter as ctk
+from tkinter import messagebox, filedialog
+from PyPDF2 import PdfReader
+from PyPDF2.generic import IndirectObject
+
+# 유틸리티 임포트
+from utils.model_manager import get_model_manager
+from utils.malware_classifier import MalwareClassifier
+from utils.virustotal_checker import create_virustotal_checker
+from utils.office_macro import is_macro_present, remove_macro
+from utils.pdf_sanitizer import sanitize_pdf, find_javascript_keys
+from utils.hwp_sanitizer import sanitize_hwp
 import config
 
-load_dotenv()
 
+class EmbeddedServer:
+    """내장 서버 관리"""
 
-class APIClient:
-    def __init__(self):
-        self.malware_bazaar_key = os.getenv('MALWARE_BAZAAR_API_KEY')
-        self.virustotal_key = os.getenv('VIRUSTOTAL_API_KEY')
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-        })
+    def __init__(self, gui_instance):
+        self.gui = gui_instance
+        self.server_process = None
+        self.server_running = False
 
-    def test_malware_bazaar_connection(self) -> bool:
-        """MalwareBazaar API 연결 테스트"""
+    def start_server(self):
+        """내장 서버 시작"""
         try:
-            if not self.malware_bazaar_key:
-                return False
+            import uvicorn
+            from retrain_server import app
 
-            url = "https://mb-api.abuse.ch/api/v1/"
-            headers = {"Auth-Key": self.malware_bazaar_key}
-            data = {"query": "get_recent", "selector": "100"}
-            response = self.session.post(url, data=data, headers=headers, timeout=10)
-
-            if response.status_code == 200:
-                result = response.json()
-                return result.get("query_status") == "ok"
-            return False
-        except Exception as e:
-            print(f"MalwareBazaar 연결 실패: {e}")
-            return False
-
-    def test_virustotal_connection(self) -> bool:
-        """VirusTotal API 연결 테스트"""
-        try:
-            if not self.virustotal_key:
-                return False
-            headers = {"x-apikey": self.virustotal_key}
-            url = "https://www.virustotal.com/api/v3/users/current"
-            response = self.session.get(url, headers=headers, timeout=10)
-            return response.status_code == 200
-        except Exception as e:
-            print(f"VirusTotal 연결 실패: {e}")
-            return False
-
-    def download_malware_samples(self, count: int = 500) -> List[str]:
-        """MalwareBazaar에서 Office 및 HWP 악성코드 샘플 다운로드"""
-        downloaded_files = []
-
-        if not self.malware_bazaar_key:
-            print("MalwareBazaar API 키가 없습니다")
-            return downloaded_files
-
-        try:
-            url = "https://mb-api.abuse.ch/api/v1/"
-            headers = {"Auth-Key": self.malware_bazaar_key}
-
-            # Office 및 HWP 문서 타입만 분류
-            document_types = {
-                'word': [],
-                'excel': [],
-                'powerpoint': [],
-                'hwp': [],
-                'general': []
-            }
-
-            print("Office 및 HWP 문서 샘플 수집 시작...")
-
-            # 최근 2000개 샘플 조회로 확대
-            print("최근 2000개 샘플 조회 중...")
-            data = {"query": "get_recent", "selector": "2000"}
-
-            response = self.session.post(url, data=data, headers=headers, timeout=30)
-            all_samples = []
-
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("query_status") == "ok":
-                    all_samples = result.get("data", [])
-                    print(f"최근 샘플 조회 성공: {len(all_samples)}개")
-
-            # Office 및 HWP 관련 태그로 추가 검색
-            office_tags = {
-                'word': ['doc', 'docx', 'word', 'msword', 'wordprocessingml'],
-                'excel': ['xls', 'xlsx', 'excel', 'spreadsheet', 'spreadsheetml'],
-                'powerpoint': ['ppt', 'pptx', 'powerpoint', 'presentation', 'presentationml'],
-                'hwp': ['hwp'],
-                'general': ['office', 'emotet', 'trickbot', 'formbook', 'agent tesla', 'lokibot']
-            }
-
-            for doc_type, tags in office_tags.items():
-                for tag in tags:
-                    if len(all_samples) >= 5000:
-                        break
-
-                    try:
-                        print(f"'{tag}' 태그 검색 중...")
-                        tag_data = {"query": "get_taginfo", "tag": tag, "limit": "200"}
-
-                        tag_response = self.session.post(url, data=tag_data, headers=headers, timeout=30)
-
-                        if tag_response.status_code == 200:
-                            tag_result = tag_response.json()
-                            if tag_result.get("query_status") == "ok":
-                                tag_samples = tag_result.get("data", [])
-                                print(f"  └ '{tag}' 태그: {len(tag_samples)}개 발견")
-
-                                # 중복 제거하며 추가
-                                existing_hashes = {s.get("sha256_hash") for s in all_samples}
-                                for sample in tag_samples:
-                                    hash_val = sample.get("sha256_hash")
-                                    if hash_val and hash_val not in existing_hashes:
-                                        all_samples.append(sample)
-                                        existing_hashes.add(hash_val)
-
-                        time.sleep(0.5)
-
-                    except Exception as tag_error:
-                        print(f"'{tag}' 태그 검색 실패: {tag_error}")
-                        continue
-
-            print(f"총 조회된 샘플: {len(all_samples)}개")
-
-            if not all_samples:
-                print("조회된 샘플이 없습니다")
-                return downloaded_files
-
-            # Office 및 HWP 파일만 분류
-            for sample in all_samples:
+            # 별도 스레드에서 서버 실행
+            def run_server():
                 try:
-                    file_name = sample.get("file_name") or ""
-                    file_type = sample.get("file_type") or ""
-                    signature = sample.get("signature") or ""
-                    file_type_mime = sample.get("file_type_mime") or ""
+                    self.server_running = True
+                    self.gui.log_append("내장 서버 시작 중...")
 
-                    file_name_lower = str(file_name).lower()
-                    file_type_lower = str(file_type).lower()
-                    signature_lower = str(signature).lower()
-                    mime_lower = str(file_type_mime).lower()
+                    uvicorn.run(
+                        app,
+                        host="127.0.0.1",
+                        port=int(config.SERVER_PORT),
+                        log_level="error"
+                    )
+                except Exception as e:
+                    self.gui.log_append(f"내장 서버 시작 실패: {e}")
+                    self.server_running = False
 
-                    classified = False
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
 
-                    # Word 문서 분류
-                    word_indicators = ['.doc', '.docx', 'doc', 'docx', 'msword', 'wordprocessingml']
-                    if any(indicator in file_name_lower or indicator in file_type_lower or indicator in mime_lower
-                           for indicator in word_indicators):
-                        document_types['word'].append(sample)
-                        classified = True
+            # 서버 시작 대기
+            time.sleep(2)
 
-                    # Excel 분류
-                    elif not classified:
-                        excel_indicators = ['.xls', '.xlsx', 'xls', 'xlsx', 'excel', 'spreadsheetml']
-                        if any(indicator in file_name_lower or indicator in file_type_lower or indicator in mime_lower
-                               for indicator in excel_indicators):
-                            document_types['excel'].append(sample)
-                            classified = True
-
-                    # PowerPoint 분류
-                    elif not classified:
-                        ppt_indicators = ['.ppt', '.pptx', 'ppt', 'pptx', 'powerpoint', 'presentationml']
-                        if any(indicator in file_name_lower or indicator in file_type_lower or indicator in mime_lower
-                               for indicator in ppt_indicators):
-                            document_types['powerpoint'].append(sample)
-                            classified = True
-
-                    # HWP 분류
-                    elif not classified:
-                        hwp_indicators = ['.hwp', '.hwpx', '.hwpml', 'hwp']
-                        if any(indicator in file_name_lower or indicator in file_type_lower
-                               for indicator in hwp_indicators):
-                            document_types['hwp'].append(sample)
-                            classified = True
-
-                    # Office 관련 악성코드 시그니처
-                    elif not classified:
-                        office_signatures = ['emotet', 'trickbot', 'qakbot', 'formbook', 'agent tesla', 'lokibot']
-                        if any(sig in signature_lower for sig in office_signatures):
-                            office_patterns = ['invoice', 'document', 'report', 'statement', 'order', 'contract']
-                            if any(pattern in file_name_lower for pattern in office_patterns):
-                                document_types['general'].append(sample)
-                                classified = True
-
-                except Exception:
-                    continue
-
-            # 타입별 샘플 수 출력
-            print("\n문서 타입별 분류 결과:")
-            for doc_type, samples in document_types.items():
-                print(f"  {doc_type.upper()}: {len(samples)}개")
-
-            # 각 타입별로 균등하게 다운로드
-            target_per_type = max(50, count // 5)
-            selected_samples = []
-
-            for doc_type, samples in document_types.items():
-                if samples:
-                    selected = samples[:min(target_per_type, len(samples))]
-                    selected_samples.extend(selected)
-                    print(f"  └ {doc_type.upper()}: {len(selected)}개 선택")
-
-            # 부족하면 추가 샘플로 채우기
-            if len(selected_samples) < count:
-                remaining = count - len(selected_samples)
-                print(f"추가로 {remaining}개 샘플 필요...")
-
-                all_doc_samples = []
-                for samples in document_types.values():
-                    all_doc_samples.extend(samples)
-
-                selected_hashes = {s.get("sha256_hash") for s in selected_samples}
-                additional_samples = [s for s in all_doc_samples
-                                      if s.get("sha256_hash") not in selected_hashes]
-
-                selected_samples.extend(additional_samples[:remaining])
-
-            selected_samples = selected_samples[:count]
-            print(f"\n최종 선택된 샘플: {len(selected_samples)}개")
-
-            if not selected_samples:
-                print("다운로드할 문서 샘플이 없습니다")
-                return downloaded_files
-
-            os.makedirs(config.DIRECTORIES['malware_samples'], exist_ok=True)
-
-            # 샘플 다운로드
-            for i, sample in enumerate(selected_samples):
-                if len(downloaded_files) >= count:
-                    break
-
-                try:
-                    sha256_hash = sample.get("sha256_hash")
-                    file_name = sample.get("file_name") or f"malware_{i:03d}"
-                    file_type = sample.get("file_type") or "unknown"
-
-                    if not sha256_hash:
-                        print("SHA256 해시가 없는 샘플 건너뜀")
-                        continue
-
-                    # 안전한 파일명 생성
-                    safe_chars = "".join(c for c in str(file_name) if c.isalnum() or c in '._-')
-                    safe_filename = safe_chars[:50] if safe_chars else f"malware_{i:03d}"
-
-                    if '.' not in safe_filename and file_type != "unknown":
-                        safe_filename += f".{file_type}"
-
-                    print(f"다운로드 중 ({i + 1}/{len(selected_samples)}): {safe_filename}")
-                    print(f"  └ 타입: {file_type}, SHA256: {sha256_hash[:16]}...")
-
-                    # 파일 다운로드
-                    download_data = {"query": "get_file", "sha256_hash": sha256_hash}
-
-                    dl_response = self.session.post(url, data=download_data, headers=headers, timeout=60)
-
-                    if dl_response.status_code == 200 and dl_response.content:
-                        # JSON 오류 응답 확인
-                        try:
-                            if dl_response.content.startswith(b'{'):
-                                error_data = dl_response.json()
-                                print(f"  API 오류: {error_data.get('query_status', 'Unknown')}")
-                                continue
-                        except:
-                            pass
-
-                        # ZIP 파일 저장
-                        zip_path = os.path.join(config.DIRECTORIES['malware_samples'], f"{safe_filename}.zip")
-
-                        with open(zip_path, "wb") as f:
-                            f.write(dl_response.content)
-
-                        print(f"  └ ZIP 파일 저장됨 ({len(dl_response.content):,} bytes)")
-
-                        # ZIP 압축 해제
-                        extracted = False
-
-                        # pyzipper 시도
-                        try:
-                            import pyzipper
-                            with pyzipper.AESZipFile(zip_path, 'r') as zip_ref:
-                                zip_ref.pwd = b'infected'
-                                extracted_files = zip_ref.namelist()
-
-                                if extracted_files:
-                                    zip_ref.extractall(config.DIRECTORIES['malware_samples'])
-
-                                    old_path = os.path.join(config.DIRECTORIES['malware_samples'], extracted_files[0])
-                                    new_path = os.path.join(config.DIRECTORIES['malware_samples'], safe_filename)
-
-                                    if os.path.exists(old_path):
-                                        if os.path.exists(new_path):
-                                            os.remove(new_path)
-                                        os.rename(old_path, new_path)
-                                        downloaded_files.append(new_path)
-                                        extracted = True
-                                        print(f"  압축 해제 성공: {safe_filename}")
-
-                            if extracted:
-                                os.remove(zip_path)
-
-                        except ImportError:
-                            print("  pyzipper 없음, 일반 zipfile 시도...")
-                        except Exception as pyzipper_error:
-                            print(f"  pyzipper 실패: {pyzipper_error}")
-
-                        # 일반 zipfile 시도
-                        if not extracted:
-                            try:
-                                import zipfile
-                                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                                    zip_ref.setpassword(b'infected')
-                                    extracted_files = zip_ref.namelist()
-
-                                    if extracted_files:
-                                        zip_ref.extractall(config.DIRECTORIES['malware_samples'])
-
-                                        old_path = os.path.join(config.DIRECTORIES['malware_samples'], extracted_files[0])
-                                        new_path = os.path.join(config.DIRECTORIES['malware_samples'], safe_filename)
-
-                                        if os.path.exists(old_path):
-                                            if os.path.exists(new_path):
-                                                os.remove(new_path)
-                                            os.rename(old_path, new_path)
-                                            downloaded_files.append(new_path)
-                                            extracted = True
-                                            print(f"  압축 해제 성공 (zipfile): {safe_filename}")
-
-                                if extracted:
-                                    os.remove(zip_path)
-
-                            except Exception as zipfile_error:
-                                print(f"  zipfile 실패: {zipfile_error}")
-
-                        # 압축 해제 실패 시 ZIP 파일로 저장
-                        if not extracted:
-                            downloaded_files.append(zip_path)
-                            print(f"  ZIP 파일로 저장: {safe_filename}.zip")
-
-                    else:
-                        print(f"  다운로드 실패: HTTP {dl_response.status_code}")
-                        if dl_response.content:
-                            try:
-                                error_response = dl_response.json()
-                                print(f"    오류: {error_response.get('query_status', 'Unknown')}")
-                            except:
-                                print(f"    응답 길이: {len(dl_response.content)} bytes")
-
-                except Exception as download_error:
-                    print(f"  다운로드 오류: {download_error}")
-
-                time.sleep(2)
-
-        except Exception as e:
-            print(f"샘플 다운로드 중 전체 오류: {e}")
-
-        print(f"\n총 {len(downloaded_files)}개 파일 다운로드 완료")
-
-        if downloaded_files:
-            print("\n다운로드된 파일 타입별 분류:")
-            type_counts = {'doc': 0, 'xls': 0, 'ppt': 0, 'hwp': 0, 'zip': 0, 'other': 0}
-
-            for file_path in downloaded_files:
-                file_name = os.path.basename(file_path).lower()
-                file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-
-                if '.doc' in file_name:
-                    type_counts['doc'] += 1
-                elif '.xls' in file_name:
-                    type_counts['xls'] += 1
-                elif '.ppt' in file_name:
-                    type_counts['ppt'] += 1
-                elif '.hwp' in file_name:
-                    type_counts['hwp'] += 1
-                elif '.zip' in file_name:
-                    type_counts['zip'] += 1
-                else:
-                    type_counts['other'] += 1
-
-                print(f"  - {os.path.basename(file_path)} ({file_size:,} bytes)")
-
-            print("\n타입별 요약:")
-            for file_type, count in type_counts.items():
-                if count > 0:
-                    print(f"  {file_type.upper()}: {count}개")
-
-        return downloaded_files
-
-    def get_clean_samples(self, count: int = 500) -> List[str]:
-        """정상 문서 샘플 생성 (clear 폴더에 저장)"""
-        clean_files = []
-        os.makedirs(config.DIRECTORIES['clean_samples'], exist_ok=True)
-
-        try:
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.pagesizes import letter
-
-            # Office 문서 형식별로 더미 생성
-            office_types = ['doc', 'xls', 'ppt']
-            per_type = count // 4
-
-            # PDF 생성
-            for i in range(per_type):
-                file_path = os.path.join(config.DIRECTORIES['clean_samples'], f"clean_document_{i:03d}.pdf")
-                c = canvas.Canvas(file_path, pagesize=letter)
-                c.drawString(100, 750, f"Clean Document #{i + 1}")
-                c.drawString(100, 730, "This is a normal, safe document.")
-                c.drawString(100, 710, f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-                c.save()
-                clean_files.append(file_path)
-
-            # 텍스트 파일로 Office 문서 시뮬레이션
-            for office_type in office_types:
-                for i in range(per_type):
-                    file_path = os.path.join(config.DIRECTORIES['clean_samples'], f"clean_{office_type}_{i:03d}.txt")
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(f"Clean {office_type.upper()} Document #{i + 1}\n")
-                        f.write("This is a normal, safe document.\n")
-                        f.write(f"Type: {office_type.upper()}\n")
-                        f.write(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    clean_files.append(file_path)
+            if self.server_running:
+                self.gui.log_append("내장 서버 시작 완료")
+                self.gui.server_connected = True
 
         except ImportError:
-            # reportlab이 없으면 텍스트 파일로만 생성
-            for i in range(count):
-                file_path = os.path.join(config.DIRECTORIES['clean_samples'], f"clean_document_{i:03d}.txt")
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(f"Clean Document #{i + 1}\n")
-                    f.write("This is a normal, safe document.\n")
-                    f.write(f"Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                clean_files.append(file_path)
+            self.gui.log_append("서버 모듈을 찾을 수 없습니다")
+        except Exception as e:
+            self.gui.log_append(f"서버 시작 오류: {e}")
 
-        return clean_files
+    def stop_server(self):
+        """서버 중지"""
+        self.server_running = False
+        if self.server_process:
+            self.server_process.terminate()
 
-    def check_file_with_virustotal(self, file_path: str) -> Dict:
-        """VirusTotal로 파일 검사"""
-        if not self.virustotal_key:
-            return {"error": "VirusTotal API 키가 없습니다"}
+
+class SanitizerGUI:
+    """문서형 악성코드 무해화 시스템 GUI"""
+
+    def __init__(self):
+        # 메인 윈도우 설정
+        self.root = ctk.CTk()
+        self.root.title("문서형 악성코드 무해화 시스템 v2.2")
+        self.root.geometry("1200x800")
+        self.root.resizable(False, False)
+
+        # 전역 변수 초기화
+        self.uploaded_files = []
+        self.model_manager = get_model_manager()
+        self.malware_classifier = MalwareClassifier()
+        self.virustotal_checker = create_virustotal_checker()
+        self.sanitization_history = []
+        self.server_connected = False
+        self.last_scan_results = []
+
+        # 내장 서버 초기화
+        self.embedded_server = EmbeddedServer(self)
+
+        # UI 생성
+        self.create_ui()
+
+        # 시스템 초기화
+        self.log_append("문서형 악성코드 무해화 시스템 v2.2 시작")
+        self.root.after(1000, self.initialize_system)
+
+    def create_ui(self):
+        """UI 구성"""
+        # 메인 프레임
+        main_frame = ctk.CTkFrame(self.root)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # 상단 버튼 프레임
+        button_frame = ctk.CTkFrame(main_frame)
+        button_frame.pack(fill="x", padx=10, pady=5)
+
+        # 파일 업로드 버튼
+        self.upload_btn = ctk.CTkButton(
+            button_frame,
+            text="파일 선택",
+            command=self.upload_files,
+            width=120,
+            height=35
+        )
+        self.upload_btn.pack(side="left", padx=5, pady=5)
+
+        # AI 스캔 버튼
+        self.scan_btn = ctk.CTkButton(
+            button_frame,
+            text="AI 스캔",
+            command=self.ai_scan_threats,
+            width=120,
+            height=35
+        )
+        self.scan_btn.pack(side="left", padx=5, pady=5)
+
+        # 무해화 버튼
+        self.sanitize_btn = ctk.CTkButton(
+            button_frame,
+            text="무해화",
+            command=self.sanitize_files,
+            width=120,
+            height=35
+        )
+        self.sanitize_btn.pack(side="left", padx=5, pady=5)
+
+        # 모델 훈련 버튼
+        self.train_btn = ctk.CTkButton(
+            button_frame,
+            text="모델 훈련",
+            command=self.train_model,
+            width=120,
+            height=35
+        )
+        self.train_btn.pack(side="left", padx=5, pady=5)
+
+        # 내역 다운로드 버튼
+        self.download_btn = ctk.CTkButton(
+            button_frame,
+            text="내역 다운로드",
+            command=self.download_sanitization_history,
+            width=120,
+            height=35
+        )
+        self.download_btn.pack(side="left", padx=5, pady=5)
+
+        # 상태 표시 레이블
+        self.status_label = ctk.CTkLabel(
+            button_frame,
+            text="준비",
+            width=200
+        )
+        self.status_label.pack(side="right", padx=10, pady=5)
+
+        # 중간 프레임 (로그와 히스토리)
+        content_frame = ctk.CTkFrame(main_frame)
+        content_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # 로그 영역
+        log_frame = ctk.CTkFrame(content_frame)
+        log_frame.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+
+        log_label = ctk.CTkLabel(log_frame, text="실행 로그", font=("Arial", 14, "bold"))
+        log_label.pack(pady=5)
+
+        self.log_text = ctk.CTkTextbox(log_frame, height=500, width=600)
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # 히스토리 영역
+        history_frame = ctk.CTkFrame(content_frame)
+        history_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+
+        history_label = ctk.CTkLabel(history_frame, text="처리 내역", font=("Arial", 14, "bold"))
+        history_label.pack(pady=5)
+
+        self.history_text = ctk.CTkTextbox(history_frame, height=500, width=400)
+        self.history_text.pack(fill="both", expand=True, padx=10, pady=5)
+
+    def log_append(self, message):
+        """로그 메시지 추가"""
+        timestamp = time.strftime("%H:%M:%S")
+        formatted_message = f"[{timestamp}] {message}\n"
+
+        self.log_text.insert("end", formatted_message)
+        self.log_text.see("end")
+        self.root.update()
+
+    def create_progress_window(self, title, message):
+        """진행률 창 생성"""
+        progress_window = ctk.CTkToplevel(self.root)
+        progress_window.title(title)
+        progress_window.geometry("400x150")
+        progress_window.transient(self.root)
+        progress_window.grab_set()
+
+        # 중앙 정렬
+        progress_window.update_idletasks()
+        x = (progress_window.winfo_screenwidth() // 2) - (400 // 2)
+        y = (progress_window.winfo_screenheight() // 2) - (150 // 2)
+        progress_window.geometry(f"400x150+{x}+{y}")
+
+        message_label = ctk.CTkLabel(progress_window, text=message, wraplength=350)
+        message_label.pack(pady=20)
+
+        progress_bar = ctk.CTkProgressBar(progress_window, width=300)
+        progress_bar.pack(pady=10)
+        progress_bar.configure(mode="indeterminate")
+        progress_bar.start()
+
+        return progress_window, progress_bar
+
+    def upload_files(self):
+        """파일 업로드"""
+        file_paths = filedialog.askopenfilenames(
+            title="분석할 파일을 선택하세요",
+            filetypes=[
+                ("지원 문서", "*.pdf *.docx *.docm *.xlsx *.xlsm *.pptx *.pptm *.hwp *.hwpx"),
+                ("PDF 파일", "*.pdf"),
+                ("Word 문서", "*.docx *.docm"),
+                ("Excel 문서", "*.xlsx *.xlsm"),
+                ("PowerPoint 문서", "*.pptx *.pptm"),
+                ("한글 문서", "*.hwp *.hwpx"),
+                ("모든 파일", "*.*")
+            ]
+        )
+
+        if file_paths:
+            self.uploaded_files = list(file_paths)
+            self.log_append(f"{len(file_paths)}개 파일 선택됨")
+
+            for file_path in file_paths:
+                self.log_append(f"  - {os.path.basename(file_path)}")
+
+            # 파일 업로드 후 자동으로 스캔 실행
+            self.root.after(500, self.ai_scan_threats)
+
+    def initialize_system(self):
+        """시스템 초기화"""
+
+        def init_thread():
+            try:
+                # 내장 서버 시작
+                self.embedded_server.start_server()
+
+                # 모델 상태 확인
+                if self.model_manager.is_model_available():
+                    if self.model_manager.load_model():
+                        self.log_append("AI 모델 로드 완료")
+                    else:
+                        self.log_append("AI 모델 로드 실패")
+                else:
+                    self.log_append("AI 모델이 없습니다. 모델 훈련을 실행하세요.")
+
+                # API 상태 확인
+                try:
+                    from utils.api_client import APIClient
+                    api_client = APIClient()
+
+                    if api_client.test_malware_bazaar_connection():
+                        self.log_append("MalwareBazaar API 연결 성공")
+                    else:
+                        self.log_append("MalwareBazaar API 연결 실패")
+
+                    if api_client.test_virustotal_connection():
+                        self.log_append("VirusTotal API 연결 성공")
+                    else:
+                        self.log_append("VirusTotal API 연결 실패")
+
+                except Exception as api_error:
+                    self.log_append(f"API 연결 확인 중 오류: {api_error}")
+
+                self.status_label.configure(text="시스템 준비 완료")
+
+            except Exception as e:
+                self.log_append(f"시스템 초기화 오류: {e}")
+
+        init_thread = threading.Thread(target=init_thread, daemon=True)
+        init_thread.start()
+
+    def ai_scan_threats(self):
+        """AI 모델 + 룰 기반 + VirusTotal 통합 탐지"""
+        if not self.uploaded_files:
+            messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
+            return
+
+        self.log_text.delete("1.0", "end")
+        self.history_text.delete("1.0", "end")
+
+        progress_window, progress_bar = self.create_progress_window(
+            "통합 악성코드 탐지",
+            "AI + 룰 기반 + VirusTotal 통합 스캔 중...\n잠시만 기다려주세요."
+        )
 
         try:
-            with open(file_path, "rb") as f:
-                file_hash = hashlib.sha256(f.read()).hexdigest()
+            from utils.api_client import APIClient
+            api_client = APIClient()
+            virustotal_available = bool(api_client.virustotal_key)
+        except:
+            virustotal_available = False
 
-            headers = {"x-apikey": self.virustotal_key}
-            url = f"https://www.virustotal.com/api/v3/files/{file_hash}"
+        def scan_thread():
+            try:
+                self.log_text.insert("end", "=== 통합 악성코드 탐지 시작 ===\n")
+                if virustotal_available:
+                    self.log_text.insert("end", "VirusTotal API 활성화됨\n")
+                else:
+                    self.log_text.insert("end", "VirusTotal API 비활성화 (의심 파일만 AI+룰 기반 검사)\n")
+                self.log_text.insert("end", "=" * 50 + "\n")
 
-            response = self.session.get(url, headers=headers, timeout=30)
+                # 검사 결과 저장용
+                scan_results = []
 
-            if response.status_code == 200:
-                result = response.json()
-                stats = result.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-                return {
-                    "malicious": stats.get("malicious", 0),
-                    "suspicious": stats.get("suspicious", 0),
-                    "clean": stats.get("harmless", 0),
-                    "total": sum(stats.values()) if stats else 0
-                }
-            else:
-                return {"error": f"VirusTotal에 데이터 없음 (404)"}
+                for i, file_path in enumerate(self.uploaded_files):
+                    file_name = os.path.basename(file_path)
+                    self.log_text.insert("end", f"\n[{i + 1}/{len(self.uploaded_files)}] 1차 분석: {file_name}\n")
+                    self.root.update()
+
+                    # 파일별 결과 저장
+                    file_result = {
+                        'file_name': file_name,
+                        'file_path': file_path,
+                        'ai_result': None,
+                        'rule_threats': [],
+                        'virustotal_result': None,
+                        'final_verdict': "정상",
+                        'scan_timestamp': time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+
+                    is_suspicious = False
+                    ai_result = None
+                    rule_threats = []
+
+                    # AI 분석
+                    if self.model_manager.is_model_available() and self.model_manager.load_model():
+                        ai_result = self.model_manager.predict_file(file_path)
+                        file_result['ai_result'] = ai_result
+
+                        if "error" not in ai_result:
+                            prediction = ai_result['prediction']
+                            confidence = ai_result['confidence']
+                            malware_prob = ai_result.get('malware_probability', 0)
+
+                            self.log_text.insert("end", f"[AI] 예측: {prediction} (신뢰도: {confidence:.3f})\n")
+
+                            if prediction == "악성":
+                                is_suspicious = True
+                                self.log_text.insert("end", f"      └ 악성 확률: {malware_prob:.3f}\n")
+                        else:
+                            self.log_text.insert("end", f"[AI] 오류: {ai_result['error']}\n")
+
+                    # 룰 기반 분석
+                    ext = os.path.splitext(file_path)[1].lower()
+
+                    try:
+                        if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
+                            if is_macro_present(file_path):
+                                rule_threats.append("매크로 탐지")
+                                is_suspicious = True
+
+                        elif ext == ".pdf":
+                            reader = PdfReader(file_path)
+                            root_obj = reader.trailer.get("/Root", {})
+                            if isinstance(root_obj, IndirectObject):
+                                root_obj = root_obj.get_object()
+
+                            found_keys = find_javascript_keys(root_obj)
+                            if found_keys:
+                                rule_threats.extend(found_keys)
+                                is_suspicious = True
+
+                        elif ext in (".hwp", ".hwpx", ".hwpml"):
+                            with open(file_path, "rb") as f:
+                                data = f.read()
+                            for pattern in [b'Shell', b'cmd', b'urlmon', b'http', b'javascript']:
+                                if pattern in data:
+                                    rule_threats.append(pattern.decode())
+                                    is_suspicious = True
+
+                        file_result['rule_threats'] = rule_threats
+                        if rule_threats:
+                            self.log_text.insert("end", f"[룰] 탐지: {', '.join(rule_threats)}\n")
+
+                    except Exception as e:
+                        self.log_text.insert("end", f"[룰] 검사 오류: {str(e)}\n")
+
+                    # VirusTotal 검증
+                    virustotal_result = None
+                    final_verdict = "정상"
+
+                    if is_suspicious and virustotal_available:
+                        self.log_text.insert("end", f"[VT] 의심 파일 → VirusTotal 재검증 중...\n")
+                        self.root.update()
+
+                        try:
+                            virustotal_result = api_client.check_file_with_virustotal(file_path)
+                            file_result['virustotal_result'] = virustotal_result
+
+                            if "error" not in virustotal_result:
+                                malicious = virustotal_result.get('malicious', 0)
+                                suspicious_vt = virustotal_result.get('suspicious', 0)
+                                total = virustotal_result.get('total', 0)
+
+                                if total > 0:
+                                    detection_rate = (malicious + suspicious_vt) / total
+                                    self.log_text.insert("end",
+                                                         f"[VT] 탐지율: {malicious + suspicious_vt}/{total} ({detection_rate:.1%})\n")
+
+                                    if malicious >= 5:
+                                        final_verdict = "고위험 악성"
+                                    elif malicious >= 2 or suspicious_vt >= 3:
+                                        final_verdict = "의심"
+                                    else:
+                                        final_verdict = "낮은 위험"
+                                else:
+                                    self.log_text.insert("end", f"[VT] 데이터베이스에 없는 파일\n")
+                                    final_verdict = "미확인"
+                            else:
+                                self.log_text.insert("end", f"[VT] 검사 실패: {virustotal_result['error']}\n")
+                                final_verdict = "AI+룰 기반 의심"
+
+                        except Exception as vt_error:
+                            self.log_text.insert("end", f"[VT] 오류: {str(vt_error)}\n")
+                            final_verdict = "AI+룰 기반 의심"
+
+                    elif is_suspicious and not virustotal_available:
+                        final_verdict = "AI+룰 기반 의심"
+
+                    file_result['final_verdict'] = final_verdict
+
+                    # 결과 정리
+                    if final_verdict != "정상":
+                        if final_verdict == "고위험 악성":
+                            self.log_text.insert("end", f"[최종] 고위험 악성 파일 확인!\n")
+                            self.history_text.insert("end", f"{file_name} (고위험 악성)\n")
+                        elif final_verdict == "의심":
+                            self.log_text.insert("end", f"[최종] 의심스러운 파일\n")
+                            self.history_text.insert("end", f"{file_name} (의심)\n")
+                        else:
+                            self.log_text.insert("end", f"[최종] 주의 필요 ({final_verdict})\n")
+                            self.history_text.insert("end", f"{file_name} ({final_verdict})\n")
+
+                        if ai_result and ai_result.get('prediction') == "악성":
+                            self.history_text.insert("end", f"  └ AI: 악성 예측 ({ai_result.get('confidence', 0):.3f})\n")
+
+                        if rule_threats:
+                            self.history_text.insert("end", f"  └ 룰: {', '.join(rule_threats)}\n")
+
+                        if virustotal_result and "error" not in virustotal_result:
+                            malicious = virustotal_result.get('malicious', 0)
+                            total = virustotal_result.get('total', 0)
+                            if total > 0:
+                                self.history_text.insert("end", f"  └ VT: {malicious}/{total}개 엔진 탐지\n")
+
+                    else:
+                        self.log_text.insert("end", f"[최종] 안전한 파일\n")
+
+                    # 검사 결과 저장
+                    scan_results.append(file_result)
+
+                    self.log_text.insert("end", "-" * 50 + "\n")
+                    self.log_text.see("end")
+                    self.root.update()
+
+                    if is_suspicious and virustotal_available:
+                        time.sleep(1)
+
+                # 검사 결과를 클래스 변수에 저장
+                self.last_scan_results = scan_results
+
+                self.log_text.insert("end", "\n=== 통합 스캔 완료 ===\n")
+
+            except Exception as e:
+                self.log_text.insert("end", f"\n[오류] 스캔 중 오류: {str(e)}\n")
+            finally:
+                progress_bar.stop()
+                progress_window.destroy()
+
+        thread = threading.Thread(target=scan_thread)
+        thread.daemon = True
+        thread.start()
+
+    def sanitize_files(self):
+        """파일 무해화"""
+        if not self.uploaded_files:
+            messagebox.showwarning("경고", "먼저 무해화할 파일을 선택하세요.")
+            return
+
+        progress_window, progress_bar = self.create_progress_window(
+            "파일 무해화",
+            "선택된 파일들을 무해화 중입니다..."
+        )
+
+        def sanitize_thread():
+            try:
+                self.log_append("=== 파일 무해화 시작 ===")
+
+                for i, file_path in enumerate(self.uploaded_files):
+                    file_name = os.path.basename(file_path)
+                    ext = os.path.splitext(file_path)[1].lower()
+
+                    self.log_append(f"[{i + 1}/{len(self.uploaded_files)}] {file_name} 무해화 중...")
+
+                    try:
+                        removed_elements = []
+                        clean_file = None
+
+                        if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
+                            clean_file, macro_removed = remove_macro(file_path)
+                            if macro_removed:
+                                removed_elements.append("매크로")
+
+                        elif ext == ".pdf":
+                            clean_file, removed_keys = sanitize_pdf(file_path)
+                            if removed_keys:
+                                removed_elements.extend(removed_keys)
+
+                        elif ext in (".hwp", ".hwpx", ".hwpml"):
+                            clean_file, removed_strings = sanitize_hwp(file_path)
+                            if removed_strings:
+                                removed_elements.extend(removed_strings)
+
+                        else:
+                            self.log_append(f"지원하지 않는 파일 형식: {ext}")
+                            continue
+
+                        if clean_file:
+                            result_msg = "성공" if removed_elements else "정상 파일 (변경사항 없음)"
+                            self.log_append(f"무해화 완료: {os.path.basename(clean_file)}")
+
+                            if removed_elements:
+                                self.log_append(f"  제거된 요소: {', '.join(removed_elements)}")
+
+                            # 무해화 이력 저장
+                            self.sanitization_history.append({
+                                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                                'original_file': file_name,
+                                'clean_file': clean_file,
+                                'file_type': ext,
+                                'result': result_msg,
+                                'removed_elements': removed_elements
+                            })
+
+                            self.history_text.insert("end", f"무해화: {file_name}\n")
+                            if removed_elements:
+                                self.history_text.insert("end", f"  제거: {', '.join(removed_elements)}\n")
+
+                        else:
+                            self.log_append(f"무해화 실패: {file_name}")
+
+                    except Exception as e:
+                        self.log_append(f"무해화 오류 ({file_name}): {str(e)}")
+
+                self.log_append("=== 무해화 완료 ===")
+                messagebox.showinfo("완료", "모든 파일의 무해화가 완료되었습니다.")
+
+            except Exception as e:
+                self.log_append(f"무해화 중 오류: {str(e)}")
+                messagebox.showerror("오류", f"무해화 중 오류가 발생했습니다:\n{str(e)}")
+            finally:
+                progress_bar.stop()
+                progress_window.destroy()
+
+        thread = threading.Thread(target=sanitize_thread)
+        thread.daemon = True
+        thread.start()
+
+    def train_model(self):
+        """모델 훈련"""
+        result = messagebox.askyesno(
+            "모델 훈련",
+            "모델 훈련을 시작하시겠습니까?\n\n"
+            "새로운 악성코드 샘플을 수집하고 AI 모델을 훈련합니다.\n"
+            "이 과정은 몇 분이 소요될 수 있습니다."
+        )
+
+        if not result:
+            return
+
+        progress_window, progress_bar = self.create_progress_window(
+            "모델 훈련",
+            "악성코드 샘플 수집 및 AI 모델 훈련 중...\n시간이 다소 소요될 수 있습니다."
+        )
+
+        def train_thread():
+            try:
+                self.log_append("=== AI 모델 훈련 시작 ===")
+
+                # 내장 서버를 통한 훈련 요청
+                if self.server_connected:
+                    try:
+                        import requests
+                        response = requests.post(
+                            f"http://localhost:{config.SERVER_PORT}/train",
+                            timeout=300
+                        )
+
+                        if response.status_code == 200:
+                            result_data = response.json()
+                            self.log_append("모델 훈련 성공!")
+                            self.log_append(f"정확도: {result_data.get('accuracy', 0):.3f}")
+                            self.log_append(f"총 샘플: {result_data.get('total_samples', 0)}개")
+
+                            # 모델 다시 로드
+                            if self.model_manager.load_model():
+                                self.log_append("새 모델 로드 완료")
+
+                        else:
+                            self.log_append("모델 훈련 실패")
+
+                    except Exception as server_error:
+                        self.log_append(f"서버 훈련 실패: {server_error}")
+                        self.log_append("로컬 훈련으로 전환...")
+
+                        # 로컬 훈련 시도
+                        from utils.model_trainer import train_model
+                        if train_model():
+                            self.log_append("로컬 모델 훈련 성공!")
+                            if self.model_manager.load_model():
+                                self.log_append("새 모델 로드 완료")
+                        else:
+                            self.log_append("로컬 모델 훈련 실패")
+
+                else:
+                    # 서버가 없으면 직접 훈련
+                    from utils.model_trainer import train_model
+                    if train_model():
+                        self.log_append("모델 훈련 성공!")
+                        if self.model_manager.load_model():
+                            self.log_append("새 모델 로드 완료")
+                    else:
+                        self.log_append("모델 훈련 실패")
+
+                self.log_append("=== 훈련 완료 ===")
+
+            except Exception as e:
+                self.log_append(f"훈련 중 오류: {str(e)}")
+            finally:
+                progress_bar.stop()
+                progress_window.destroy()
+
+        thread = threading.Thread(target=train_thread)
+        thread.daemon = True
+        thread.start()
+
+    def download_sanitization_history(self):
+        """무해화 내역을 txt 파일로 다운로드"""
+        if not self.sanitization_history and not hasattr(self, 'last_scan_results'):
+            messagebox.showwarning("경고", "다운로드할 무해화 내역이나 검사 결과가 없습니다.")
+            return
+
+        try:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("텍스트 파일", "*.txt"), ("모든 파일", "*.*")],
+                title="무해화 및 검사 내역 저장"
+            )
+
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write("=== 문서형 악성코드 탐지 및 무해화 종합 내역 ===\n\n")
+
+                    # 검사 결과 작성
+                    if hasattr(self, 'last_scan_results'):
+                        f.write("[ 1. 악성코드 검사 결과 ]\n")
+                        f.write("=" * 50 + "\n")
+
+                        for result in self.last_scan_results:
+                            f.write(f"\n파일명: {result['file_name']}\n")
+                            f.write(f"검사 시간: {result['scan_timestamp']}\n")
+                            f.write(f"최종 판정: {result['final_verdict']}\n")
+
+                            # AI 결과
+                            if result['ai_result'] and "error" not in result['ai_result']:
+                                ai = result['ai_result']
+                                f.write(f"AI 분석: {ai['prediction']} (신뢰도: {ai['confidence']:.3f})\n")
+                                if 'malware_probability' in ai:
+                                    f.write(f"  └ 악성 확률: {ai['malware_probability']:.3f}\n")
+
+                            # 룰 기반 결과
+                            if result['rule_threats']:
+                                f.write(f"룰 탐지: {', '.join(result['rule_threats'])}\n")
+
+                            # VirusTotal 결과
+                            if result['virustotal_result'] and "error" not in result['virustotal_result']:
+                                vt = result['virustotal_result']
+                                malicious = vt.get('malicious', 0)
+                                suspicious = vt.get('suspicious', 0)
+                                total = vt.get('total', 0)
+                                clean = vt.get('clean', 0)
+
+                                f.write(f"VirusTotal 검사:\n")
+                                f.write(f"  └ 악성 탐지: {malicious}개 엔진\n")
+                                f.write(f"  └ 의심 탐지: {suspicious}개 엔진\n")
+                                f.write(f"  └ 안전 판정: {clean}개 엔진\n")
+                                f.write(f"  └ 총 검사 엔진: {total}개\n")
+
+                                if total > 0:
+                                    detection_rate = (malicious + suspicious) / total * 100
+                                    f.write(f"  └ 탐지율: {detection_rate:.1f}%\n")
+
+                            f.write("-" * 30 + "\n")
+
+                    # 무해화 내역 작성
+                    if self.sanitization_history:
+                        f.write(f"\n[ 2. 무해화 처리 내역 ]\n")
+                        f.write("=" * 50 + "\n")
+
+                        for entry in self.sanitization_history:
+                            f.write(f"\n처리 시간: {entry['timestamp']}\n")
+                            f.write(f"원본 파일: {entry['original_file']}\n")
+                            f.write(f"파일 유형: {entry['file_type']}\n")
+                            f.write(f"무해화 결과: {entry['result']}\n")
+                            f.write(f"저장 위치: {entry['clean_file']}\n")
+                            f.write(f"제거된 요소: {', '.join(entry['removed_elements'])}\n")
+
+                            # 해당 파일의 검사 결과도 함께 표시
+                            if hasattr(self, 'last_scan_results'):
+                                matching_result = None
+                                for scan_result in self.last_scan_results:
+                                    if scan_result['file_name'] == entry['original_file']:
+                                        matching_result = scan_result
+                                        break
+
+                                if matching_result and matching_result['virustotal_result']:
+                                    vt = matching_result['virustotal_result']
+                                    if "error" not in vt:
+                                        f.write(
+                                            f"검사 시 VirusTotal 탐지: {vt.get('malicious', 0)}/{vt.get('total', 0)}개 엔진\n")
+
+                            f.write("-" * 30 + "\n")
+
+                    # 요약 정보
+                    f.write(f"\n[ 3. 요약 정보 ]\n")
+                    f.write("=" * 50 + "\n")
+
+                    if hasattr(self, 'last_scan_results'):
+                        total_scanned = len(self.last_scan_results)
+                        malicious_detected = sum(1 for r in self.last_scan_results if r['final_verdict'] != "정상")
+                        f.write(f"총 검사 파일: {total_scanned}개\n")
+                        f.write(f"악성/의심 탐지: {malicious_detected}개\n")
+                        f.write(f"안전 파일: {total_scanned - malicious_detected}개\n")
+
+                    if self.sanitization_history:
+                        f.write(f"무해화 처리: {len(self.sanitization_history)}개\n")
+
+                    f.write(f"\n생성 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write("문서형 악성코드 무해화 시스템 v2.2\n")
+
+                messagebox.showinfo("완료", f"종합 내역이 저장되었습니다:\n{file_path}")
 
         except Exception as e:
-            return {"error": f"검사 중 오류: {str(e)}"}
+            messagebox.showerror("오류", f"내역 저장 중 오류가 발생했습니다:\n{str(e)}")
+
+    def run(self):
+        """애플리케이션 실행"""
+        self.root.mainloop()
 
 
-def collect_training_data(malware_count: int = 500, clean_count: int = 500):
-    """훈련 데이터 수집 v2.2"""
-    client = APIClient()
-
-    print("=== 훈련 데이터 수집 시작 v2.2 ===")
-
-    print(f"악성 샘플 {malware_count}개 다운로드 중...")
-    malware_files = client.download_malware_samples(malware_count)
-    print(f"악성 샘플 다운로드 완료: {len(malware_files)}개")
-
-    print(f"정상 샘플 {clean_count}개 생성 중...")
-    clean_files = client.get_clean_samples(clean_count)
-    print(f"정상 샘플 생성 완료: {len(clean_files)}개")
-
-    print("=== 데이터 수집 완료 ===")
-
-    return malware_files, clean_files
+def main():
+    """메인 실행 함수"""
+    try:
+        # GUI 실행
+        app = SanitizerGUI()
+        app.run()
+    except Exception as e:
+        print(f"애플리케이션 실행 오류: {e}")
 
 
 if __name__ == "__main__":
-    collect_training_data()
+    main()
