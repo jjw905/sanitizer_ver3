@@ -7,14 +7,17 @@ numpy>=1.24.0
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# GUI 라이브러리 ( 신규 추가 )
+# GUI 라이브러리
 customtkinter>=5.2.0
 
 # 보안 및 압축
 pyzipper>=0.3.6
 reportlab>=4.0.0
 
-# 선택적 라이브러리 ( 성능 향상 )
+# 데이터 불균형 해결
+imbalanced-learn>=0.11.0
+
+# 선택적 라이브러리 (성능 향상)
 matplotlib>=3.7.0
 seaborn>=0.12.0
 
