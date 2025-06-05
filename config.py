@@ -1,4 +1,4 @@
-# config.py - 개선된 설정 (EC2 연결 설정 포함)
+# config.py - 개선된 설정 (정상/악성 비율 조정)
 import os
 import socket
 import platform
@@ -38,20 +38,22 @@ API_ENDPOINTS = {
     'virustotal_api': 'https://www.virustotal.com/api/v3/'
 }
 
-# 샘플 수집 설정 (정상 샘플 개수 제한 추가)
+# 샘플 수집 설정 (악성 비율 증가, 정상 비율 감소)
 SAMPLE_LIMITS = {
-    'total_malware_target': 300,
-    'total_clean_target': 300,
-    'minimum_per_type': 40,
-    'pdf_target': 80,
-    'word_target': 80,
-    'excel_target': 60,
-    'powerpoint_target': 50,
-    'hwp_target': 50,
-    'rtf_target': 30,
-    'malwarebazaar_share': 0.6,
-    'triage_share': 0.4,
-    'clean_sample_ratio_limit': 1.0  # 정상:악성 = 1:1 비율 제한
+    'total_malware_target': 400,      # 악성 샘플 목표 증가
+    'total_clean_target': 200,        # 정상 샘플 목표 감소
+    'minimum_per_type': 50,
+    'pdf_target': 120,                # PDF 악성 샘플 증가
+    'word_target': 120,               # Word 악성 샘플 증가
+    'excel_target': 80,
+    'powerpoint_target': 60,
+    'hwp_target': 40,
+    'rtf_target': 20,
+    'malwarebazaar_share': 0.6,       # MalwareBazaar 60%
+    'triage_share': 0.4,              # Tria.ge 40%
+    'clean_sample_ratio_limit': 0.5,  # 정상:악성 = 1:2 비율 (악성이 더 많음)
+    'virustotal_verified_clean_ratio': 0.8,  # 정상 샘플의 80%는 VirusTotal 검증 필요
+    'local_generated_clean_limit': 20  # 로컬 생성 정상 샘플 최대 20개
 }
 
 # 디렉토리 설정
@@ -62,10 +64,10 @@ DIRECTORIES = {
     'models': 'models',
     'temp': 'temp',
     'temp_db_samples': 'temp_db_samples',
-    'ec2_keys': 'keys'  # EC2 키 저장 디렉토리
+    'ec2_keys': 'keys'
 }
 
-# 악성코드 분류 매핑
+# 악성코드 분류 매핑 (확장됨)
 MALWARE_CLASSIFICATIONS = {
     'emotet': {
         'family': 'Trojan.Emotet',
@@ -129,6 +131,20 @@ MALWARE_CLASSIFICATIONS = {
     }
 }
 
+# VirusTotal 설정 (개선됨)
+VIRUSTOTAL_CONFIG = {
+    'clean_threshold': 0,           # 악성 탐지 0개여야 정상으로 인정
+    'suspicious_threshold': 0,      # 의심 탐지도 0개여야 함
+    'minimum_engines': 15,          # 최소 15개 엔진에서 검사되어야 함
+    'request_delay': 1.0,          # API 요청 간격 (초)
+    'timeout': 30,                 # 요청 타임아웃 (초)
+    'retry_count': 3,              # 재시도 횟수
+    'clean_sample_sources': [       # 정상 샘플 검색 소스
+        'type:pdf positives:0 size:100KB+',
+        'type:office positives:0 size:50KB+',
+        'type:document positives:0 engines:20+'
+    ]
+}
 
 # 네트워크 및 서버 설정 개선
 def get_local_ip():
@@ -361,7 +377,7 @@ RDS_CONFIG = {
     'connect_timeout': 10
 }
 
-# 자동화 설정
+# 자동화 설정 (개선됨)
 AUTOMATION_CONFIG = {
     'auto_upload_to_s3': True,
     'auto_save_to_rds': True,
@@ -369,7 +385,10 @@ AUTOMATION_CONFIG = {
     'feature_extraction': True,
     'cleanup_temp_files': True,
     'secure_delete_malware': True,
-    'ec2_auto_connect': EC2_CONFIG['auto_connect']
+    'ec2_auto_connect': EC2_CONFIG['auto_connect'],
+    'balance_dataset': True,           # 데이터셋 균형 조정
+    'verify_clean_samples': True,      # 정상 샘플 검증 강화
+    'malware_ratio_preference': 0.65   # 악성 샘플 비율 선호도
 }
 
 # 보안 설정
@@ -379,7 +398,8 @@ SECURITY_CONFIG = {
     'temp_file_cleanup': True,
     'rds_verification': True,
     'local_malware_auto_delete': True,
-    'ec2_key_protection': True
+    'ec2_key_protection': True,
+    'virustotal_verification': True    # VirusTotal 검증 필수
 }
 
 # 성능 최적화 설정
@@ -389,7 +409,8 @@ PERFORMANCE_CONFIG = {
     'memory_limit_mb': 1024,
     'cache_features': True,
     'compress_samples': True,
-    'duplicate_filter_early': True
+    'duplicate_filter_early': True,
+    'smart_sampling': True            # 스마트 샘플링 활성화
 }
 
 # 로그 설정
@@ -470,7 +491,9 @@ def get_system_info():
             'malwarebazaar': bool(API_KEYS['malwarebazaar']),
             'virustotal': bool(API_KEYS['virustotal']),
             'triage': bool(API_KEYS['triage'])
-        }
+        },
+        'sample_collection_config': SAMPLE_LIMITS,
+        'virustotal_config': VIRUSTOTAL_CONFIG
     }
 
 
@@ -516,6 +539,13 @@ if __name__ == "__main__":
         print(f"  EC2 호스트: {EC2_HOST}")
         print(f"  키 파일: {'사용 가능' if sys_info['ec2_key_available'] else '없음'}")
         print(f"  포트 포워딩: {EC2_LOCAL_PORT} -> {EC2_REMOTE_PORT}")
+
+    # 샘플 수집 설정
+    print(f"\n샘플 수집 설정:")
+    print(f"  악성 샘플 목표: {SAMPLE_LIMITS['total_malware_target']}개")
+    print(f"  정상 샘플 목표: {SAMPLE_LIMITS['total_clean_target']}개")
+    print(f"  정상/악성 비율 제한: {SAMPLE_LIMITS['clean_sample_ratio_limit']}")
+    print(f"  VirusTotal 검증 비율: {SAMPLE_LIMITS['virustotal_verified_clean_ratio']}")
 
     # 설정 검증
     issues = validate_config()

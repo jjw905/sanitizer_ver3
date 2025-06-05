@@ -1,4 +1,4 @@
-# utils/model_trainer.py - 개선된 평가 기준 적용
+# utils/model_trainer.py - 데이터 불균형 해결 및 성능 개선
 
 import os
 import pickle
@@ -10,6 +10,10 @@ from sklearn.model_selection import train_test_split, cross_val_score, Stratifie
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support
 from sklearn.ensemble import VotingClassifier
+from sklearn.utils.class_weight import compute_class_weight
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.pipeline import Pipeline
 import pandas as pd
 from utils.feature_extractor import FeatureExtractor
 from sqlalchemy import text
@@ -31,8 +35,8 @@ class ModelTrainer:
 
     def prepare_training_data(self, malware_dir: str = None,
                               clean_dir: str = None, use_db: bool = True) -> tuple:
-        """훈련 데이터 준비 (RDS 우선, 로컬 보조)"""
-        print("=== 훈련 데이터 준비 중 (RDS 우선) ===")
+        """훈련 데이터 준비 (불균형 해결 포함)"""
+        print("=== 훈련 데이터 준비 중 (불균형 해결 적용) ===")
 
         if malware_dir is None:
             malware_dir = config.DIRECTORIES['malware_samples']
@@ -102,14 +106,23 @@ class ModelTrainer:
         final_malware_files = self._remove_duplicate_files(final_malware_files)
         final_clean_files = self._remove_duplicate_files(final_clean_files)
 
+        # 데이터 균형 조정 (악성 샘플이 더 많아야 함)
+        if len(final_clean_files) > len(final_malware_files) * 0.6:
+            # 정상 샘플이 악성 샘플의 60%를 초과하면 줄임
+            target_clean_count = int(len(final_malware_files) * 0.6)
+            final_clean_files = final_clean_files[:target_clean_count]
+            print(f"정상 샘플 수를 {len(final_clean_files)}개로 조정")
+
         all_files = final_malware_files + final_clean_files
         all_labels = [1] * len(final_malware_files) + [0] * len(final_clean_files)
 
         print(f"최종 훈련 데이터: 악성 {len(final_malware_files)}개, 정상 {len(final_clean_files)}개")
         print(f"총 샘플 수: {len(all_files)}개")
+        print(
+            f"비율 - 악성: {len(final_malware_files) / (len(all_files)) * 100:.1f}%, 정상: {len(final_clean_files) / (len(all_files)) * 100:.1f}%")
 
-        if len(final_malware_files) < 10 or len(final_clean_files) < 10:
-            print("훈련 데이터가 부족합니다. 각각 최소 10개 이상 필요합니다.")
+        if len(final_malware_files) < 20 or len(final_clean_files) < 10:
+            print("훈련 데이터가 부족합니다. 악성 20개, 정상 10개 이상 필요합니다.")
             return None, None
 
         # 특징 추출
@@ -152,39 +165,103 @@ class ModelTrainer:
             print(f"RDS 데이터 로드 실패: {e}")
             return []
 
-    def _train_with_data(self, features, labels, test_size):
-        """실제 모델 훈련 수행 - 엄격한 평가 적용"""
+    def _apply_data_balancing(self, features, labels):
+        """데이터 불균형 해결 (SMOTE + 언더샘플링)"""
+        print("\n=== 데이터 균형 조정 ===")
+
+        # 원본 분포 확인
+        unique, counts = np.unique(labels, return_counts=True)
+        print(f"원본 분포 - 정상: {counts[0]}, 악성: {counts[1] if len(counts) > 1 else 0}")
+
+        # 클래스 불균형이 심하지 않으면 그대로 사용
+        if len(counts) > 1:
+            imbalance_ratio = max(counts) / min(counts)
+            print(f"불균형 비율: {imbalance_ratio:.2f}")
+
+            if imbalance_ratio < 2.0:  # 2:1 비율 이하면 균형 조정 안함
+                print("데이터 균형이 적절함 - 조정하지 않음")
+                return features, labels
+
         try:
-            # 데이터 분할 - 엄격한 평가를 위해 30% 테스트 셋 사용
-            X_train, X_test, y_train, y_test = train_test_split(
-                features, labels, test_size=0.3, random_state=42,
-                stratify=labels if len(np.unique(labels)) > 1 else None
+            # 1단계: SMOTE로 소수 클래스 오버샘플링 (적당히)
+            smote = SMOTE(
+                sampling_strategy=0.7,  # 소수 클래스를 다수 클래스의 70%까지 증가
+                random_state=42,
+                k_neighbors=min(5, min(counts) - 1) if min(counts) > 1 else 1
             )
 
+            # 2단계: 랜덤 언더샘플링으로 다수 클래스 감소
+            undersampler = RandomUnderSampler(
+                sampling_strategy=0.6,  # 다수 클래스를 소수 클래스의 60% 비율로 감소
+                random_state=42
+            )
+
+            # 파이프라인으로 순차 적용
+            pipeline = Pipeline([
+                ('smote', smote),
+                ('undersample', undersampler)
+            ])
+
+            X_balanced, y_balanced = pipeline.fit_resample(features, labels)
+
+            # 결과 확인
+            unique_balanced, counts_balanced = np.unique(y_balanced, return_counts=True)
+            print(f"조정 후 분포 - 정상: {counts_balanced[0]}, 악성: {counts_balanced[1] if len(counts_balanced) > 1 else 0}")
+            print(f"총 샘플 수: {len(X_balanced)}개 (원본: {len(features)}개)")
+
+            return X_balanced, y_balanced
+
+        except Exception as e:
+            print(f"데이터 균형 조정 실패: {e}")
+            print("원본 데이터 사용")
+            return features, labels
+
+    def _train_with_data(self, features, labels, test_size):
+        """실제 모델 훈련 수행 - 불균형 해결 적용"""
+        try:
+            # 데이터 균형 조정
+            features_balanced, labels_balanced = self._apply_data_balancing(features, labels)
+
+            # 데이터 분할
+            X_train, X_test, y_train, y_test = train_test_split(
+                features_balanced, labels_balanced, test_size=0.25, random_state=42,
+                stratify=labels_balanced if len(np.unique(labels_balanced)) > 1 else None
+            )
+
+            print(f"\n=== 데이터 분할 결과 ===")
             print(f"훈련 세트: {len(X_train)}개")
             print(f"테스트 세트: {len(X_test)}개")
+
+            # 클래스 가중치 계산
+            class_weights = compute_class_weight(
+                'balanced',
+                classes=np.unique(y_train),
+                y=y_train
+            )
+            class_weight_dict = {i: weight for i, weight in enumerate(class_weights)}
+            print(f"클래스 가중치: {class_weight_dict}")
 
             # 데이터 정규화
             print("데이터 정규화 중...")
             X_train_scaled = self.scaler.fit_transform(X_train)
             X_test_scaled = self.scaler.transform(X_test)
 
-            # 개별 모델 훈련
+            # 개별 모델 훈련 (가중치 적용)
             trained_models, model_scores = self.train_individual_models(
-                X_train_scaled, X_test_scaled, y_train, y_test
+                X_train_scaled, X_test_scaled, y_train, y_test, class_weight_dict
             )
 
             # 앙상블 모델 생성 및 훈련
             self.ensemble_model = self.create_ensemble_model(trained_models)
             self.ensemble_model.fit(X_train_scaled, y_train)
 
-            print("\n=== 엄격한 앙상블 모델 평가 ===")
+            print("\n=== 앙상블 모델 평가 ===")
 
-            # 1. 테스트 세트 평가
+            # 테스트 세트 평가
             ensemble_pred = self.ensemble_model.predict(X_test_scaled)
             test_accuracy = accuracy_score(y_test, ensemble_pred)
 
-            # 2. 교차 검증 평가 (더 엄격한 평가)
+            # 교차 검증 평가
             cv_folds = min(5, len(np.unique(y_train)))
             if cv_folds > 1:
                 skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
@@ -196,17 +273,29 @@ class ModelTrainer:
                 cv_mean = test_accuracy
                 cv_std = 0
 
-            # 3. 정밀도, 재현율, F1-score 계산
+            # 정밀도, 재현율, F1-score 계산
             precision, recall, f1, _ = precision_recall_fscore_support(
                 y_test, ensemble_pred, average='weighted', zero_division=0
             )
 
-            # 실제 성능 지표 출력
+            # 클래스별 상세 성능
+            precision_per_class, recall_per_class, f1_per_class, _ = precision_recall_fscore_support(
+                y_test, ensemble_pred, average=None, zero_division=0
+            )
+
             print(f"테스트 세트 정확도: {test_accuracy:.4f}")
             print(f"교차 검증 정확도: {cv_mean:.4f} (+/- {cv_std * 2:.4f})")
-            print(f"정밀도: {precision:.4f}")
-            print(f"재현율: {recall:.4f}")
-            print(f"F1-점수: {f1:.4f}")
+            print(f"전체 정밀도: {precision:.4f}")
+            print(f"전체 재현율: {recall:.4f}")
+            print(f"전체 F1-점수: {f1:.4f}")
+
+            # 클래스별 성능 출력
+            if len(precision_per_class) > 1:
+                print(f"\n클래스별 성능:")
+                print(
+                    f"정상 파일 - 정밀도: {precision_per_class[0]:.4f}, 재현율: {recall_per_class[0]:.4f}, F1: {f1_per_class[0]:.4f}")
+                print(
+                    f"악성 파일 - 정밀도: {precision_per_class[1]:.4f}, 재현율: {recall_per_class[1]:.4f}, F1: {f1_per_class[1]:.4f}")
 
             print("\n분류 리포트:")
             print(classification_report(y_test, ensemble_pred, target_names=['정상', '악성']))
@@ -214,14 +303,14 @@ class ModelTrainer:
             cm = confusion_matrix(y_test, ensemble_pred)
             print(f"혼동 행렬:\n{cm}")
 
-            # 보수적인 성능 평가 - 교차 검증 점수를 기본으로 사용
-            final_accuracy = min(test_accuracy, cv_mean)  # 더 보수적인 점수 사용
+            # 보수적인 성능 평가
+            final_accuracy = min(test_accuracy, cv_mean)
 
             print(f"\n최종 보수적 평가 정확도: {final_accuracy:.4f}")
 
             self.save_model()
 
-            # 메타데이터에 더 상세한 정보 저장
+            # 메타데이터에 상세한 정보 저장
             self.save_model_metadata(
                 accuracy=final_accuracy,
                 test_accuracy=test_accuracy,
@@ -230,9 +319,12 @@ class ModelTrainer:
                 precision=precision,
                 recall=recall,
                 f1_score=f1,
-                malware_count=int(np.sum(labels)),
-                clean_count=int(len(labels) - np.sum(labels)),
-                model_version="2.2"
+                malware_count=int(np.sum(labels_balanced)),
+                clean_count=int(len(labels_balanced) - np.sum(labels_balanced)),
+                model_version="2.2",
+                class_weights=class_weight_dict,
+                precision_per_class=precision_per_class.tolist() if len(precision_per_class) > 1 else [precision],
+                recall_per_class=recall_per_class.tolist() if len(recall_per_class) > 1 else [recall]
             )
 
             if config.USE_AWS:
@@ -246,6 +338,8 @@ class ModelTrainer:
 
         except Exception as e:
             print(f"모델 훈련 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return False, None
 
     def _cleanup_local_malware_samples(self):
@@ -277,39 +371,42 @@ class ModelTrainer:
         except Exception as e:
             print(f"로컬 샘플 정리 오류: {e}")
 
-    def train_individual_models(self, X_train, X_test, y_train, y_test):
-        """개별 모델 훈련 - 더 엄격한 평가"""
+    def train_individual_models(self, X_train, X_test, y_train, y_test, class_weights):
+        """개별 모델 훈련 - 클래스 가중치 적용"""
         models = {
             'RandomForest': RandomForestClassifier(
-                n_estimators=150,  # 더 많은 트리
+                n_estimators=200,
                 random_state=42,
-                max_depth=8,  # 과적합 방지
-                min_samples_split=10,  # 더 엄격한 분할
-                min_samples_leaf=5,
-                class_weight='balanced',
-                max_features='sqrt'
+                max_depth=10,
+                min_samples_split=8,
+                min_samples_leaf=4,
+                class_weight=class_weights,
+                max_features='sqrt',
+                bootstrap=True
             ),
             'GradientBoosting': GradientBoostingClassifier(
-                n_estimators=100,
+                n_estimators=150,
                 random_state=42,
-                max_depth=5,  # 과적합 방지
-                learning_rate=0.05,  # 더 낮은 학습률
-                subsample=0.8
+                max_depth=6,
+                learning_rate=0.1,
+                subsample=0.8,
+                min_samples_split=8,
+                min_samples_leaf=4
             ),
             'SVM': SVC(
                 kernel='rbf',
                 probability=True,
                 random_state=42,
-                C=0.5,  # 더 강한 정규화
+                C=1.0,
                 gamma='scale',
-                class_weight='balanced'
+                class_weight=class_weights
             )
         }
 
         trained_models = {}
         model_scores = {}
 
-        print("\n=== 개별 모델 훈련 (엄격한 평가) ===")
+        print("\n=== 개별 모델 훈련 (클래스 가중치 적용) ===")
 
         for name, model in models.items():
             print(f"\n{name} 훈련 중...")
@@ -330,17 +427,25 @@ class ModelTrainer:
                 cv_mean = test_accuracy
                 cv_std = 0
 
+            # 정밀도, 재현율 계산
+            precision, recall, f1, _ = precision_recall_fscore_support(
+                y_test, y_pred, average='weighted', zero_division=0
+            )
+
             trained_models[name] = model
             model_scores[name] = {
                 'test_accuracy': test_accuracy,
                 'cv_mean': cv_mean,
                 'cv_std': cv_std,
-                'conservative_score': min(test_accuracy, cv_mean)  # 보수적 점수
+                'precision': precision,
+                'recall': recall,
+                'f1_score': f1,
+                'conservative_score': min(test_accuracy, cv_mean)
             }
 
             print(f"{name} - 테스트 정확도: {test_accuracy:.4f}")
             print(f"{name} - CV 평균: {cv_mean:.4f} (+/- {cv_std * 2:.4f})")
-            print(f"{name} - 보수적 점수: {model_scores[name]['conservative_score']:.4f}")
+            print(f"{name} - 정밀도: {precision:.4f}, 재현율: {recall:.4f}, F1: {f1:.4f}")
 
         return trained_models, model_scores
 
@@ -348,7 +453,9 @@ class ModelTrainer:
                             cv_accuracy: float = None, cv_std: float = None,
                             precision: float = None, recall: float = None,
                             f1_score: float = None, malware_count: int = 0,
-                            clean_count: int = 0, model_version="2.2"):
+                            clean_count: int = 0, model_version="2.2",
+                            class_weights: dict = None, precision_per_class: list = None,
+                            recall_per_class: list = None):
         """상세한 모델 메타데이터 저장"""
         import json
         from datetime import datetime
@@ -366,13 +473,17 @@ class ModelTrainer:
             "f1_score": round(f1_score, 4) if f1_score else None,
             "trained_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
             "model_version": model_version,
-            "evaluation_method": "stratified_cv_with_holdout_test"
+            "evaluation_method": "balanced_stratified_cv_with_smote",
+            "class_weights": class_weights,
+            "precision_per_class": [round(p, 4) for p in precision_per_class] if precision_per_class else None,
+            "recall_per_class": [round(r, 4) for r in recall_per_class] if recall_per_class else None,
+            "data_balancing": "SMOTE + RandomUnderSampler applied"
         }
 
         with open("models/model_meta.json", "w") as f:
-            json.dump(meta, f)
+            json.dump(meta, f, indent=2)
 
-        print("model_meta.json 저장 완료 (상세 평가 정보 포함)")
+        print("model_meta.json 저장 완료 (균형 조정 정보 포함)")
 
     def save_training_history(self, features, labels, accuracy: float, model_version: str = "2.2"):
         """훈련 기록 저장"""
@@ -431,7 +542,7 @@ class ModelTrainer:
             print(f"훈련 기록 로드 실패: {e}")
             return None, None
 
-    def incremental_train_model(self, test_size=0.3):
+    def incremental_train_model(self, test_size=0.25):
         """증분 학습"""
         print("=== 모델 증분 학습 시작 ===")
 
@@ -476,7 +587,7 @@ class ModelTrainer:
 
         return success
 
-    def train_model(self, test_size=0.3):
+    def train_model(self, test_size=0.25):
         """전체 모델 훈련"""
         print("=== 모델 전체 훈련 시작 ===")
 
@@ -519,7 +630,7 @@ class ModelTrainer:
                 ('gb', trained_models['GradientBoosting']),
                 ('svm', trained_models['SVM'])
             ],
-            voting='soft'
+            voting='soft'  # 확률 기반 투표
         )
 
         return voting_clf
@@ -556,7 +667,7 @@ class ModelTrainer:
             return False
 
     def predict(self, file_path: str) -> dict:
-        """파일 악성코드 예측"""
+        """파일 악성코드 예측 (개선된 신뢰도 계산)"""
         if self.ensemble_model is None:
             if not self.load_model():
                 return {"error": "모델을 로드할 수 없습니다"}
@@ -593,12 +704,25 @@ class ModelTrainer:
             prediction = self.ensemble_model.predict(features_scaled)[0]
             probability = self.ensemble_model.predict_proba(features_scaled)[0]
 
+            # 신뢰도 계산 개선
+            max_prob = max(probability)
+            confidence = max_prob
+
+            # 확률 차이를 고려한 신뢰도 조정
+            if len(probability) > 1:
+                prob_diff = abs(probability[1] - probability[0])
+                confidence = max_prob * (0.5 + 0.5 * prob_diff)
+
             return {
                 "prediction": "악성" if prediction == 1 else "정상",
-                "confidence": max(probability),
-                "malware_probability": probability[1] if len(probability) > 1 else 0,
+                "confidence": confidence,
+                "malware_probability": probability[1] if len(probability) > 1 else (1 - probability[0]),
                 "clean_probability": probability[0],
-                "features": features
+                "features": features,
+                "probability_distribution": {
+                    "정상": float(probability[0]),
+                    "악성": float(probability[1]) if len(probability) > 1 else float(1 - probability[0])
+                }
             }
 
         except Exception as e:
@@ -652,7 +776,7 @@ def train_model():
     except:
         print("RDS 연결 없음")
 
-    if malware_count + clean_count < 10:
+    if malware_count + clean_count < 15:
         print("로컬 데이터가 부족하지만 RDS 데이터로 훈련을 진행합니다...")
 
     success = trainer.train_model()

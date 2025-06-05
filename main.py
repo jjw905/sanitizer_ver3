@@ -1,4 +1,4 @@
-# main.py - GUI 개선 및 내장 서버 통합
+# main.py - VirusTotal 연동 수정 및 GUI 개선
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -320,6 +320,9 @@ class DocSanitizerApp:
                 # 모델 상태 업데이트
                 self.update_model_status()
 
+                # API 상태 확인 (VirusTotal 포함)
+                self.check_api_status()
+
                 self.model_log_append("시스템 초기화 완료")
 
             except Exception as e:
@@ -328,6 +331,35 @@ class DocSanitizerApp:
 
         thread = threading.Thread(target=init_thread, daemon=True)
         thread.start()
+
+    def check_api_status(self):
+        """API 상태 확인 (VirusTotal 문제 해결)"""
+        try:
+            # VirusTotal 체커 생성 및 테스트
+            if self.virustotal_checker and self.virustotal_checker.is_available():
+                if self.virustotal_checker.test_connection():
+                    self.model_log_append("VirusTotal API 연결 성공")
+                else:
+                    self.model_log_append("VirusTotal API 연결 실패 - 키 확인 필요")
+            else:
+                self.model_log_append("VirusTotal API 키가 설정되지 않음")
+
+            # 다른 API들도 확인
+            from utils.api_client import APIClient
+            api_client = APIClient()
+
+            if api_client.test_malware_bazaar_connection():
+                self.model_log_append("MalwareBazaar API 연결 성공")
+            else:
+                self.model_log_append("MalwareBazaar API 연결 실패")
+
+            if api_client.test_triage_connection():
+                self.model_log_append("Tria.ge API 연결 성공")
+            else:
+                self.model_log_append("Tria.ge API 연결 실패")
+
+        except Exception as e:
+            self.model_log_append(f"API 상태 확인 오류: {e}")
 
     def update_server_status(self, message, color):
         """서버 상태 업데이트"""
@@ -473,7 +505,7 @@ class DocSanitizerApp:
         return progress_window, progress_bar
 
     def ai_scan_threats(self):
-        """AI 모델 + 룰 기반 + VirusTotal 통합 탐지"""
+        """AI 모델 + 룰 기반 + VirusTotal 통합 탐지 (수정됨)"""
         if not self.uploaded_files:
             messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
             return
@@ -486,12 +518,10 @@ class DocSanitizerApp:
             "AI + 룰 기반 + VirusTotal 통합 스캔 중...\n잠시만 기다려주세요."
         )
 
-        try:
-            from utils.api_client import APIClient
-            api_client = APIClient()
-            virustotal_available = bool(api_client.virustotal_key)
-        except:
-            virustotal_available = False
+        # VirusTotal 상태 확인 (수정됨)
+        virustotal_available = False
+        if self.virustotal_checker:
+            virustotal_available = self.virustotal_checker.is_available() and self.virustotal_checker.test_connection()
 
         def scan_thread():
             try:
@@ -562,7 +592,7 @@ class DocSanitizerApp:
                     except Exception as e:
                         self.log_text.insert("end", f"[룰] 검사 오류: {str(e)}\n")
 
-                    # VirusTotal 검증
+                    # VirusTotal 검증 (수정됨)
                     virustotal_result = None
                     final_verdict = "정상"
 
@@ -571,24 +601,28 @@ class DocSanitizerApp:
                         self.root.update()
 
                         try:
-                            virustotal_result = api_client.check_file_with_virustotal(file_path)
+                            virustotal_result = self.virustotal_checker.comprehensive_check(file_path)
 
                             if "error" not in virustotal_result:
-                                malicious = virustotal_result.get('malicious', 0)
-                                suspicious_vt = virustotal_result.get('suspicious', 0)
-                                total = virustotal_result.get('total', 0)
+                                if virustotal_result.get("found"):
+                                    malicious = virustotal_result.get('malicious', 0)
+                                    suspicious_vt = virustotal_result.get('suspicious', 0)
+                                    total = virustotal_result.get('total_engines', 0)
 
-                                if total > 0:
-                                    detection_rate = (malicious + suspicious_vt) / total
-                                    self.log_text.insert("end",
-                                                         f"[VT] 탐지율: {malicious + suspicious_vt}/{total} ({detection_rate:.1%})\n")
+                                    if total > 0:
+                                        detection_rate = (malicious + suspicious_vt) / total
+                                        self.log_text.insert("end",
+                                                             f"[VT] 탐지율: {malicious + suspicious_vt}/{total} ({detection_rate:.1%})\n")
 
-                                    if malicious >= 5:
-                                        final_verdict = "고위험 악성"
-                                    elif malicious >= 2 or suspicious_vt >= 3:
-                                        final_verdict = "의심"
+                                        if malicious >= 5:
+                                            final_verdict = "고위험 악성"
+                                        elif malicious >= 2 or suspicious_vt >= 3:
+                                            final_verdict = "의심"
+                                        else:
+                                            final_verdict = "낮은 위험"
                                     else:
-                                        final_verdict = "낮은 위험"
+                                        self.log_text.insert("end", f"[VT] 검사 결과 없음\n")
+                                        final_verdict = "미확인"
                                 else:
                                     self.log_text.insert("end", f"[VT] 데이터베이스에 없는 파일\n")
                                     final_verdict = "미확인"
@@ -621,9 +655,9 @@ class DocSanitizerApp:
                         if rule_threats:
                             self.history_text.insert("end", f"  └ 룰: {', '.join(rule_threats)}\n")
 
-                        if virustotal_result and "error" not in virustotal_result:
+                        if virustotal_result and "error" not in virustotal_result and virustotal_result.get("found"):
                             malicious = virustotal_result.get('malicious', 0)
-                            total = virustotal_result.get('total', 0)
+                            total = virustotal_result.get('total_engines', 0)
                             if total > 0:
                                 self.history_text.insert("end", f"  └ VT: {malicious}/{total}개 엔진 탐지\n")
 
@@ -721,11 +755,60 @@ class DocSanitizerApp:
                         'removed_elements': removed_elements if removed_elements else ['없음']
                     })
 
+                    # 정상 샘플을 서버에 저장
+                    self._save_clean_sample_to_server(clean_file, file_name)
+
             except Exception as e:
                 self.log_append(f"[오류] 처리 중 오류 발생: {str(e)}")
 
         self.log_append("=== 무해화 완료 ===")
         messagebox.showinfo("완료", "문서 무해화가 완료되었습니다!\n정리된 파일은 sample/clean 폴더에 저장되었습니다.")
+
+    def _save_clean_sample_to_server(self, clean_file_path: str, original_name: str):
+        """무해화된 파일을 정상 샘플로 서버에 저장"""
+        try:
+            import hashlib
+            import shutil
+
+            # 파일을 clear 폴더에 복사
+            clean_samples_dir = config.DIRECTORIES['clean_samples']
+            os.makedirs(clean_samples_dir, exist_ok=True)
+
+            # 새 파일명 생성 (중복 방지)
+            timestamp = int(time.time())
+            file_ext = os.path.splitext(original_name)[1]
+            new_filename = f"sanitized_{timestamp}_{original_name}"
+
+            dest_path = os.path.join(clean_samples_dir, new_filename)
+            shutil.copy2(clean_file_path, dest_path)
+
+            # 해시 계산
+            with open(dest_path, 'rb') as f:
+                file_hash = hashlib.sha256(f.read()).hexdigest()
+
+            # RDS에 메타데이터 저장
+            from utils import db, aws_helper
+
+            # S3 업로드
+            s3_key = None
+            if config.USE_AWS:
+                s3_key = aws_helper.upload_virus_sample(dest_path, file_hash)
+
+            # RDS에 정상 샘플로 저장
+            db.save_virus_sample(
+                file_path=dest_path,
+                file_hash=file_hash,
+                is_malicious=False,  # 정상 파일
+                source='sanitized_document',
+                malware_family='clean_document',
+                threat_category='clean',
+                s3_key=s3_key
+            )
+
+            self.log_append(f"[서버] 정상 샘플로 저장: {new_filename}")
+
+        except Exception as e:
+            self.log_append(f"[서버] 정상 샘플 저장 실패: {e}")
 
     def retrain_model_locally(self):
         """로컬 모델 재훈련 (서버 없이)"""
@@ -744,8 +827,8 @@ class DocSanitizerApp:
 
                 try:
                     malware_files, clean_files = collect_training_data_with_progress(
-                        malware_count=100,
-                        clean_count=100,
+                        malware_count=200,  # 악성 샘플 증가
+                        clean_count=120,  # 정상 샘플 감소
                         progress_callback=progress_callback
                     )
 
@@ -780,6 +863,13 @@ class DocSanitizerApp:
                         self.model_log_append(f"악성 샘플: {meta.get('malware_samples', 0)}개")
                         self.model_log_append(f"정상 샘플: {meta.get('clean_samples', 0)}개")
                         self.model_log_append(f"훈련 시각: {meta.get('trained_at', 'N/A')}")
+
+                        # 클래스별 성능 정보
+                        if 'precision_per_class' in meta:
+                            prec = meta['precision_per_class']
+                            if len(prec) >= 2:
+                                self.model_log_append(f"정상 파일 정밀도: {prec[0]:.3f}")
+                                self.model_log_append(f"악성 파일 정밀도: {prec[1]:.3f}")
 
                     except Exception as meta_error:
                         self.model_log_append(f"메타 정보 로드 실패: {meta_error}")
@@ -854,6 +944,10 @@ class DocSanitizerApp:
 
                             self.model_log_append(f"훈련 시각: {meta['trained_at']}")
                             self.model_log_append(f"모델 버전: {meta['model_version']}")
+
+                            # 데이터 균형 정보
+                            if 'data_balancing' in meta:
+                                self.model_log_append(f"데이터 균형 조정: {meta['data_balancing']}")
                         else:
                             self.model_log_append("model_meta.json 없음 또는 파싱 실패")
                     else:
