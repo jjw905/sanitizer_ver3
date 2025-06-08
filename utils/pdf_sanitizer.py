@@ -98,3 +98,54 @@ def extract_pdf_javascript(file_path: str) -> dict:
         print(f"JavaScript 추출 중 오류: {e}")
 
     return js_contents
+
+def remove_javascript_recursive(obj, removed_keys):
+    """재귀적으로 JavaScript 관련 키 제거"""
+    if isinstance(obj, dict):
+        keys_to_remove = []
+        for key in obj:
+            if str(key) in ["/JavaScript", "/JS", "/OpenAction", "/AA", "/URI", "/Launch", "/SubmitForm"]:
+                keys_to_remove.append(key)
+                removed_keys.append(str(key))
+            else:
+                remove_javascript_recursive(obj.get(key), removed_keys)
+        for key in keys_to_remove:
+            del obj[key]
+    elif isinstance(obj, list):
+        for item in obj:
+            remove_javascript_recursive(item, removed_keys)
+
+def sanitize_pdf(file_path: str, output_dir: str = None) -> tuple[str, list[str]]:
+    """PDF 파일에서 잠재적으로 위험한 요소(JavaScript, 자동 실행 등)를 제거"""
+    if output_dir is None:
+        output_dir = config.DIRECTORIES['sanitized_output']
+
+    filename = os.path.splitext(os.path.basename(file_path))[0]
+    clean_file = os.path.join(output_dir, f"{filename}_clean.pdf")
+
+    removed_keys = []
+
+    try:
+        reader = PdfReader(file_path)
+        writer = PdfWriter()
+
+        # 모든 페이지를 새 writer에 추가
+        for page in reader.pages:
+            writer.add_page(page)
+
+        # 문서의 루트(Root) 객체에서 재귀적으로 위험한 키워드 제거
+        # PyPDF2 4.x.x 버전 호환성을 위해 _root가 아닌 trailer 사용
+        if "/Root" in writer._trailer:
+            root = writer._trailer["/Root"]
+            remove_javascript_recursive(root, removed_keys)
+
+        os.makedirs(output_dir, exist_ok=True)
+        with open(clean_file, "wb") as f:
+            writer.write(f)
+
+    except Exception as e:
+        print(f"PDF 무해화 중 오류 발생: {e}")
+        return file_path, []
+
+    # 중복 제거 후 반환
+    return clean_file, list(set(removed_keys))

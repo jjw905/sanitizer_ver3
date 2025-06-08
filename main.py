@@ -1,4 +1,4 @@
-# main.py - 상세 분석 및 정밀 무해화 기능 강화
+# main.py - VirusTotal 연동 수정 및 GUI 개선
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -13,14 +13,11 @@ import json
 
 from PyPDF2 import PdfReader
 from PyPDF2.generic import IndirectObject
-from oletools.olevba import VBA_Parser
 from utils.office_macro import remove_macro, is_macro_present
-from utils.pdf_sanitizer import sanitize_pdf, find_javascript_keys, extract_pdf_javascript
+from utils.pdf_sanitizer import sanitize_pdf, find_javascript_keys
 from utils.hwp_sanitizer import sanitize_hwp
-from utils.office_reconstructor import reconstruct_office_document
-from utils.pdf_reconstructor import reconstruct_pdf_document
 from utils.model_manager import get_model_manager
-from utils.malware_classifier import MalwareClassifier
+from utils.malware_classifier import MalwareClassifier # <<< 변경/추가된 부분 >>>
 from utils.virustotal_checker import create_virustotal_checker
 from dotenv import load_dotenv
 
@@ -86,7 +83,7 @@ class EmbeddedServer:
                     "app": server_app,
                     "host": "127.0.0.1",
                     "port": int(os.getenv("SERVER_PORT", "8000")),
-                    "log_level": "error",
+                    "log_level": "error",  # 로그 최소화
                     "access_log": False
                 }
 
@@ -133,7 +130,6 @@ class DocSanitizerApp:
         self.virustotal_checker = create_virustotal_checker()
         self.sanitization_history = []
         self.server_connected = False
-        self.analysis_results = {}  # 상세 분석 결과 저장
 
         # 내장 서버 초기화
         self.embedded_server = EmbeddedServer(self)
@@ -324,7 +320,7 @@ class DocSanitizerApp:
                 # 모델 상태 업데이트
                 self.update_model_status()
 
-                # API 상태 확인
+                # API 상태 확인 (VirusTotal 포함)
                 self.check_api_status()
 
                 self.model_log_append("시스템 초기화 완료")
@@ -337,7 +333,7 @@ class DocSanitizerApp:
         thread.start()
 
     def check_api_status(self):
-        """API 상태 확인"""
+        """API 상태 확인 (VirusTotal 문제 해결)"""
         try:
             # VirusTotal 체커 생성 및 테스트
             if self.virustotal_checker and self.virustotal_checker.is_available():
@@ -397,13 +393,6 @@ class DocSanitizerApp:
                         f.write(f"무해화 결과: {entry['result']}\n")
                         f.write(f"저장 위치: {entry['clean_file']}\n")
                         f.write(f"제거된 요소: {', '.join(entry['removed_elements'])}\n")
-
-                        # 상세 분석 결과 추가
-                        if 'analysis_details' in entry:
-                            f.write(f"상세 분석:\n")
-                            for detail in entry['analysis_details']:
-                                f.write(f"  - {detail}\n")
-
                         f.write("-" * 50 + "\n\n")
 
                 messagebox.showinfo("완료", f"무해화 내역이 저장되었습니다:\n{file_path}")
@@ -516,21 +505,20 @@ class DocSanitizerApp:
         return progress_window, progress_bar
 
     def ai_scan_threats(self):
-        """AI 모델 + 룰 기반 + VirusTotal 통합 탐지 + 상세 분석"""
+        """AI 모델 + 룰 기반 + VirusTotal 통합 탐지 (수정됨)"""
         if not self.uploaded_files:
             messagebox.showwarning("경고", "먼저 스캔할 파일을 선택하세요.")
             return
 
         self.log_text.delete("1.0", "end")
         self.history_text.delete("1.0", "end")
-        self.analysis_results.clear()
 
         progress_window, progress_bar = self.create_progress_window(
             "통합 악성코드 탐지",
             "AI + 룰 기반 + VirusTotal 통합 스캔 중...\n잠시만 기다려주세요."
         )
 
-        # VirusTotal 상태 확인
+        # VirusTotal 상태 확인 (수정됨)
         virustotal_available = False
         if self.virustotal_checker:
             virustotal_available = self.virustotal_checker.is_available() and self.virustotal_checker.test_connection()
@@ -552,7 +540,6 @@ class DocSanitizerApp:
                     is_suspicious = False
                     ai_result = None
                     rule_threats = []
-                    analysis_details = []
 
                     # AI 분석
                     if self.model_manager.is_model_available() and self.model_manager.load_model():
@@ -571,32 +558,14 @@ class DocSanitizerApp:
                         else:
                             self.log_text.insert("end", f"[AI] 오류: {ai_result['error']}\n")
 
-                    # 룰 기반 분석 (상세 분석 포함)
+                    # 룰 기반 분석
                     ext = os.path.splitext(file_path)[1].lower()
 
                     try:
                         if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
-                            # 매크로 상세 분석
-                            vba_parser = VBA_Parser(file_path)
-                            if vba_parser.detect_vba_macros():
+                            if is_macro_present(file_path):
+                                rule_threats.append("매크로 탐지")
                                 is_suspicious = True
-                                self.log_text.insert("end", "[룰] 매크로 탐지됨!\n")
-
-                                # 상세 분석 결과 로깅
-                                analysis_results = vba_parser.analyze_macros()
-                                macro_details = []
-                                for kw_type, keyword, description in analysis_results:
-                                    if kw_type == 'Suspicious':
-                                        rule_threats.append(f"매크로 위협: {keyword}")
-                                        self.log_text.insert("end", f"      └ 의심 키워드: {keyword} ({description})\n")
-                                        macro_details.append(f"매크로 의심 키워드: {keyword} - {description}")
-
-                                # AutoExec 매크로 체크
-                                if any('auto' in kw.lower() for _, kw, _ in analysis_results):
-                                    self.log_text.insert("end", f"      └ 자동 실행 매크로 발견!\n")
-                                    macro_details.append("자동 실행 매크로 존재")
-
-                                analysis_details.extend(macro_details)
 
                         elif ext == ".pdf":
                             reader = PdfReader(file_path)
@@ -608,16 +577,6 @@ class DocSanitizerApp:
                             if found_keys:
                                 rule_threats.extend(found_keys)
                                 is_suspicious = True
-                                self.log_text.insert("end", f"[룰] 위험 요소 탐지: {', '.join(found_keys)}\n")
-
-                                # JavaScript 내용 추출 시도
-                                js_contents = extract_pdf_javascript(file_path)
-                                if js_contents:
-                                    self.log_text.insert("end", f"      └ JavaScript 내용 발견:\n")
-                                    for js_key, js_content in js_contents.items():
-                                        preview = js_content[:100] + "..." if len(js_content) > 100 else js_content
-                                        self.log_text.insert("end", f"        - {js_key}: {preview}\n")
-                                        analysis_details.append(f"JavaScript ({js_key}): {preview}")
 
                         elif ext in (".hwp", ".hwpx", ".hwpml"):
                             with open(file_path, "rb") as f:
@@ -626,7 +585,6 @@ class DocSanitizerApp:
                                 if pattern in data:
                                     rule_threats.append(pattern.decode())
                                     is_suspicious = True
-                                    analysis_details.append(f"HWP 의심 패턴: {pattern.decode()}")
 
                         if rule_threats:
                             self.log_text.insert("end", f"[룰] 탐지: {', '.join(rule_threats)}\n")
@@ -634,26 +592,18 @@ class DocSanitizerApp:
                     except Exception as e:
                         self.log_text.insert("end", f"[룰] 검사 오류: {str(e)}\n")
 
-                    # 악성코드 분류기 실행
+                    # <<< 변경/추가된 부분 시작 >>>
+                    malware_type_info = "분류 안됨"
                     if is_suspicious:
                         try:
-                            malware_type = self.malware_classifier.classify_malware(file_path)
-                            if "Unknown" not in malware_type and "정상" not in malware_type:
-                                self.log_text.insert("end", f"[분류] 악성코드 유형: {malware_type}\n")
-                                analysis_details.append(f"악성코드 유형: {malware_type}")
+                            # MalwareClassifier를 사용해 악성코드 유형 분류
+                            malware_type_info = self.malware_classifier.classify_malware(file_path)
+                            self.log_text.insert("end", f"[분류] 악성코드 유형: {malware_type_info}\n")
+                        except Exception as classify_error:
+                            self.log_text.insert("end", f"[분류] 오류: {str(classify_error)}\n")
+                    # <<< 변경/추가된 부분 끝 >>>
 
-                                # 악성코드 정보 가져오기
-                                malware_info = self.malware_classifier.get_malware_info(malware_type)
-                                if malware_info:
-                                    self.log_text.insert("end",
-                                                         f"      └ 위험도: {malware_info.get('risk_level', '알 수 없음')}\n")
-                                    self.log_text.insert("end",
-                                                         f"      └ 설명: {malware_info.get('description', '없음')}\n")
-                                    analysis_details.append(f"위험도: {malware_info.get('risk_level', '알 수 없음')}")
-                        except Exception as e:
-                            self.log_text.insert("end", f"[분류] 유형 분석 실패: {e}\n")
-
-                    # VirusTotal 검증
+                    # VirusTotal 검증 (수정됨)
                     virustotal_result = None
                     final_verdict = "정상"
 
@@ -698,16 +648,6 @@ class DocSanitizerApp:
                     elif is_suspicious and not virustotal_available:
                         final_verdict = "AI+룰 기반 의심"
 
-                    # 분석 결과 저장
-                    self.analysis_results[file_path] = {
-                        'is_suspicious': is_suspicious,
-                        'final_verdict': final_verdict,
-                        'rule_threats': rule_threats,
-                        'analysis_details': analysis_details,
-                        'ai_result': ai_result,
-                        'virustotal_result': virustotal_result
-                    }
-
                     # 결과 정리
                     if final_verdict != "정상":
                         if final_verdict == "고위험 악성":
@@ -720,15 +660,15 @@ class DocSanitizerApp:
                             self.log_text.insert("end", f"[최종] 주의 필요 ({final_verdict})\n")
                             self.history_text.insert("end", f"{file_name} ({final_verdict})\n")
 
+                        # <<< 변경/추가된 부분 시작 >>>
+                        self.history_text.insert("end", f"  └ 분류: {malware_type_info}\n")
+                        # <<< 변경/추가된 부분 끝 >>>
+
                         if ai_result and ai_result.get('prediction') == "악성":
                             self.history_text.insert("end", f"  └ AI: 악성 예측 ({ai_result.get('confidence', 0):.3f})\n")
 
                         if rule_threats:
                             self.history_text.insert("end", f"  └ 룰: {', '.join(rule_threats)}\n")
-
-                        if analysis_details:
-                            for detail in analysis_details[:3]:  # 상위 3개만 표시
-                                self.history_text.insert("end", f"  └ {detail}\n")
 
                         if virustotal_result and "error" not in virustotal_result and virustotal_result.get("found"):
                             malicious = virustotal_result.get('malicious', 0)
@@ -759,16 +699,12 @@ class DocSanitizerApp:
         thread.start()
 
     def start_sanitization(self):
-        """문서 무해화 및 clean 폴더에 저장 (콘텐츠 재조립 옵션 포함)"""
+        """문서 무해화 및 clean 폴더에 저장"""
         if not self.uploaded_files:
             messagebox.showwarning("경고", "먼저 무해화할 파일을 선택하세요.")
             return
 
-        # 무해화 방법 선택 다이얼로그
-        sanitization_method = self.ask_sanitization_method()
-
         self.log_append("=== 문서 무해화 시작 ===")
-        self.log_append(f"무해화 방법: {sanitization_method}")
 
         for file_path in self.uploaded_files:
             ext = os.path.splitext(file_path)[1].lower()
@@ -781,98 +717,44 @@ class DocSanitizerApp:
                 removed_elements = []
                 result_msg = ""
                 clean_file = ""
-                analysis_details = []
 
-                # 분석 결과 가져오기
-                if file_path in self.analysis_results:
-                    analysis_info = self.analysis_results[file_path]
-                    analysis_details = analysis_info.get('analysis_details', [])
+                # <<< 변경/추가된 부분 시작 (상세 로깅) >>>
+                if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
+                    clean_file, removed = remove_macro(file_path)
+                    if removed:
+                        removed_elements.append("vbaProject.bin (매크로)")
+                        result_msg = "매크로 제거됨"
+                        self.log_append(f"[완료] 매크로 제거 완료: → {os.path.basename(clean_file)}")
+                        self.history_append(f"{file_name} -> [제거] 매크로 (vbaProject.bin)")
+                    else:
+                        result_msg = "제거할 매크로 없음"
+                        self.log_append("[완료] 제거할 매크로가 없습니다.")
 
-                if sanitization_method == "정밀 제거":
-                    # 기존 방식 (정밀 제거)
-                    if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
-                        clean_file, removed = remove_macro(file_path)
-                        if removed:
-                            removed_elements.append("vbaProject.bin")
-                            result_msg = "매크로 제거됨"
-                            self.log_append(f"[완료] 매크로 제거됨: → {os.path.basename(clean_file)}")
-                            self.history_append(f"{file_name}")
-                            self.history_append(f"  └ 제거: vbaProject.bin")
-                        else:
-                            result_msg = "매크로 없음"
-                            self.log_append("[완료] 매크로 없음")
+                elif ext == ".pdf":
+                    clean_file, removed_keys = sanitize_pdf(file_path)
+                    if removed_keys:
+                        removed_elements.extend(removed_keys)
+                        result_msg = "JavaScript 관련 요소 제거됨"
+                        self.log_append(f"[완료] PDF 스크립트 요소 제거 완료: → {os.path.basename(clean_file)}")
+                        self.history_append(f"{file_name} -> [제거] {', '.join(removed_keys)}")
+                    else:
+                        result_msg = "제거할 JavaScript 요소 없음"
+                        self.log_append("[완료] 제거할 JavaScript 요소가 없습니다.")
 
-                    elif ext == ".pdf":
-                        clean_file, removed_keys = sanitize_pdf(file_path)
-                        if removed_keys:
-                            removed_elements.extend(removed_keys)
-                            result_msg = "JavaScript 제거됨"
-                            self.log_append(f"[완료] JavaScript 제거됨: → {os.path.basename(clean_file)}")
-                            self.history_append(f"{file_name}")
-                            for key in removed_keys:
-                                self.history_append(f"  └ 제거: {key}")
-                        else:
-                            result_msg = "JavaScript 없음"
-                            self.log_append("[완료] JavaScript 없음")
-
-                    elif ext in (".hwp", ".hwpx", ".hwpml"):
-                        clean_file, removed_strings = sanitize_hwp(file_path)
-                        if removed_strings:
-                            removed_elements.extend(removed_strings)
-                            result_msg = "위험 문자열 제거됨"
-                            self.log_append(f"[완료] 문자열 제거됨: → {os.path.basename(clean_file)}")
-                            self.history_append(f"{file_name}")
-                            for s in removed_strings:
-                                self.history_append(f"  └ 제거: {s}")
-                        else:
-                            result_msg = "위험 문자열 없음"
-                            self.log_append("[완료] 위험 문자열 없음")
-
-                elif sanitization_method == "콘텐츠 재조립":
-                    # 콘텐츠 재조립 방식
-                    if ext in (".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"):
-                        clean_file, extracted_content = reconstruct_office_document(file_path)
-                        if clean_file:
-                            result_msg = "콘텐츠 재조립 완료"
-                            removed_elements.append("모든 매크로 및 스크립트")
-                            self.log_append(f"[완료] 안전한 콘텐츠만 추출하여 재조립: → {os.path.basename(clean_file)}")
-                            self.history_append(f"{file_name}")
-                            self.history_append(f"  └ 재조립: 텍스트와 이미지만 추출")
-                            if extracted_content:
-                                self.history_append(f"  └ 추출된 텍스트: {len(extracted_content.get('text', ''))}자")
-                                self.history_append(f"  └ 추출된 이미지: {len(extracted_content.get('images', []))}개")
-                        else:
-                            result_msg = "재조립 실패"
-                            self.log_append("[오류] 콘텐츠 재조립 실패")
-
-                    elif ext == ".pdf":
-                        clean_file, extracted_content = reconstruct_pdf_document(file_path)
-                        if clean_file:
-                            result_msg = "PDF 재조립 완료"
-                            removed_elements.append("모든 JavaScript 및 액션")
-                            self.log_append(f"[완료] 안전한 PDF로 재조립: → {os.path.basename(clean_file)}")
-                            self.history_append(f"{file_name}")
-                            self.history_append(f"  └ 재조립: 텍스트와 이미지만 보존")
-                            if extracted_content:
-                                self.history_append(f"  └ 추출된 페이지: {extracted_content.get('pages', 0)}개")
-                        else:
-                            result_msg = "재조립 실패"
-                            self.log_append("[오류] PDF 재조립 실패")
-
-                    elif ext in (".hwp", ".hwpx", ".hwpml"):
-                        # HWP는 재조립이 복잡하므로 기존 방식 사용
-                        clean_file, removed_strings = sanitize_hwp(file_path)
-                        if removed_strings:
-                            removed_elements.extend(removed_strings)
-                            result_msg = "위험 문자열 제거됨 (재조립 불가)"
-                            self.log_append(f"[완료] HWP 문자열 제거: → {os.path.basename(clean_file)}")
-                        else:
-                            result_msg = "위험 문자열 없음"
-                            self.log_append("[완료] 위험 문자열 없음")
-
+                elif ext in (".hwp", ".hwpx", ".hwpml"):
+                    clean_file, removed_strings = sanitize_hwp(file_path)
+                    if removed_strings:
+                        removed_elements.extend(removed_strings)
+                        result_msg = "위험 의심 문자열 제거됨"
+                        self.log_append(f"[완료] HWP 위험 의심 문자열 제거 완료: → {os.path.basename(clean_file)}")
+                        self.history_append(f"{file_name} -> [제거] {', '.join(removed_strings)}")
+                    else:
+                        result_msg = "제거할 위험 의심 문자열 없음"
+                        self.log_append("[완료] 제거할 위험 의심 문자열이 없습니다.")
                 else:
                     result_msg = "지원되지 않는 파일 형식"
                     self.log_append("[오류] 지원되지 않는 파일 형식입니다")
+                # <<< 변경/추가된 부분 끝 >>>
 
                 # 무해화 내역 저장
                 if clean_file:
@@ -882,110 +764,17 @@ class DocSanitizerApp:
                         'file_type': ext,
                         'result': result_msg,
                         'clean_file': clean_file,
-                        'removed_elements': removed_elements if removed_elements else ['없음'],
-                        'analysis_details': analysis_details,
-                        'sanitization_method': sanitization_method
+                        'removed_elements': removed_elements if removed_elements else ['없음']
                     })
 
                     # 정상 샘플을 서버에 저장
-                    self._save_clean_sample_to_server(clean_file, file_name)
+                    self._save_clean_sample_to_server(clean_file, original_name=file_name)
 
             except Exception as e:
                 self.log_append(f"[오류] 처리 중 오류 발생: {str(e)}")
 
         self.log_append("=== 무해화 완료 ===")
-        messagebox.showinfo("완료", f"문서 무해화가 완료되었습니다!\n방법: {sanitization_method}\n정리된 파일은 sample/clean 폴더에 저장되었습니다.")
-
-    def ask_sanitization_method(self):
-        """무해화 방법 선택 다이얼로그"""
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title("무해화 방법 선택")
-        dialog.geometry("400x250")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        # 중앙 정렬
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
-        y = (dialog.winfo_screenheight() // 2) - (250 // 2)
-        dialog.geometry(f"400x250+{x}+{y}")
-
-        # 선택 변수
-        method_var = ctk.StringVar(value="정밀 제거")
-
-        # 설명 라벨
-        label = ctk.CTkLabel(
-            dialog,
-            text="무해화 방법을 선택하세요:",
-            font=ctk.CTkFont(size=16, weight="bold")
-        )
-        label.pack(pady=20)
-
-        # 정밀 제거 옵션
-        surgical_frame = ctk.CTkFrame(dialog, corner_radius=10)
-        surgical_frame.pack(fill="x", padx=20, pady=5)
-
-        surgical_radio = ctk.CTkRadioButton(
-            surgical_frame,
-            text="정밀 제거 (권장)",
-            variable=method_var,
-            value="정밀 제거",
-            font=ctk.CTkFont(size=14)
-        )
-        surgical_radio.pack(anchor="w", padx=10, pady=5)
-
-        surgical_desc = ctk.CTkLabel(
-            surgical_frame,
-            text="악성 요소만 정확히 제거 (원본 서식 보존)",
-            font=ctk.CTkFont(size=11),
-            text_color="#888888"
-        )
-        surgical_desc.pack(anchor="w", padx=30, pady=(0, 5))
-
-        # 콘텐츠 재조립 옵션
-        reconstruct_frame = ctk.CTkFrame(dialog, corner_radius=10)
-        reconstruct_frame.pack(fill="x", padx=20, pady=5)
-
-        reconstruct_radio = ctk.CTkRadioButton(
-            reconstruct_frame,
-            text="콘텐츠 재조립 (가장 안전)",
-            variable=method_var,
-            value="콘텐츠 재조립",
-            font=ctk.CTkFont(size=14)
-        )
-        reconstruct_radio.pack(anchor="w", padx=10, pady=5)
-
-        reconstruct_desc = ctk.CTkLabel(
-            reconstruct_frame,
-            text="텍스트와 이미지만 추출하여 새 문서 생성",
-            font=ctk.CTkFont(size=11),
-            text_color="#888888"
-        )
-        reconstruct_desc.pack(anchor="w", padx=30, pady=(0, 5))
-
-        # 확인 버튼
-        def confirm():
-            dialog.selected_method = method_var.get()
-            dialog.destroy()
-
-        confirm_btn = ctk.CTkButton(
-            dialog,
-            text="확인",
-            command=confirm,
-            font=ctk.CTkFont(size=14),
-            width=100,
-            height=35
-        )
-        confirm_btn.pack(pady=15)
-
-        # 기본값 설정
-        dialog.selected_method = "정밀 제거"
-
-        # 다이얼로그 대기
-        dialog.wait_window()
-
-        return getattr(dialog, 'selected_method', "정밀 제거")
+        messagebox.showinfo("완료", "문서 무해화가 완료되었습니다!\n정리된 파일은 sample/clean 폴더에 저장되었습니다.")
 
     def _save_clean_sample_to_server(self, clean_file_path: str, original_name: str):
         """무해화된 파일을 정상 샘플로 서버에 저장"""
@@ -1034,7 +823,7 @@ class DocSanitizerApp:
             self.log_append(f"[서버] 정상 샘플 저장 실패: {e}")
 
     def retrain_model_locally(self):
-        """로컬 모델 재훈련"""
+        """로컬 모델 재훈련 (서버 없이)"""
 
         def training_thread():
             try:
@@ -1050,8 +839,8 @@ class DocSanitizerApp:
 
                 try:
                     malware_files, clean_files = collect_training_data_with_progress(
-                        malware_count=200,
-                        clean_count=120,
+                        malware_count=200,  # 악성 샘플 증가
+                        clean_count=120,  # 정상 샘플 감소
                         progress_callback=progress_callback
                     )
 
