@@ -1,5 +1,8 @@
+# test_api.py - 유동적 샘플 수집 기능 추가
+
 import os
 import sys
+import argparse  # <<< argparse 라이브러리 추가
 from dotenv import load_dotenv
 from utils.api_client import APIClient, collect_training_data_with_progress
 from utils.model_manager import ModelManager
@@ -29,8 +32,42 @@ class OptimizedProgressTracker:
             print()
 
 
+# <<< 변경/추가된 부분 시작 >>>
+def run_flexible_collection(malware_count: int, clean_count: int):
+    """지정된 개수만큼 샘플을 유동적으로 수집하는 함수"""
+    print(f"🚀 샘플 수집 시작 (목표: 악성 {malware_count}개, 정상 {clean_count}개)")
+    print("=" * 50)
+
+    # API 키 확인
+    api_client = APIClient()
+    if not api_client.malware_bazaar_key:
+        print("\n⚠️  API 키 설정 필요: .env 파일에서 MALWARE_BAZAAR_API_KEY를 설정해주세요.")
+        return False
+
+    def progress_callback(message):
+        print(f"[진행] {message}")
+
+    try:
+        malware_files, clean_files = collect_training_data_with_progress(
+            malware_count=malware_count,
+            clean_count=clean_count,
+            progress_callback=progress_callback
+        )
+        print("\n🎉 샘플 수집 완료!")
+        print(f"결과: 악성 {len(malware_files)}개, 정상 {len(clean_files)}개")
+        print("=" * 50)
+        return True
+    except Exception as e:
+        print(f"\n❌ 샘플 수집 중 오류 발생: {e}")
+        return False
+
+
+# <<< 변경/추가된 부분 끝 >>>
+
+
 def test_system():
     """시스템 상태 확인"""
+    # ... (기존 test_system 함수 코드는 변경 없음)
     print("=== 시스템 상태 확인 ===")
 
     load_dotenv()
@@ -48,7 +85,7 @@ def test_system():
 
     # Triage API
     triage_status = "✅" if api_client.triage_key and api_client.test_triage_connection() else "❌"
-    print(f"   Triage: {triage_status}")
+    print(f"   Tria.ge: {triage_status}")
 
     print("\n2. RDS 연결 상태")
     try:
@@ -111,6 +148,7 @@ def test_system():
 
 def setup_system_optimized():
     """최적화된 시스템 설정 (과적합 방지)"""
+    # ... (기존 setup_system_optimized 함수 코드는 변경 없음)
     print("🚀 문서형 악성코드 무해화 시스템 v2.2 설정")
     print("=" * 50)
 
@@ -232,6 +270,7 @@ def setup_system_optimized():
         return False
 
 
+# ... (quick_test, show_system_info, automated_retrain 함수는 기존과 동일) ...
 def quick_test():
     """빠른 기능 테스트"""
     print("=== 빠른 기능 테스트 ===")
@@ -430,32 +469,49 @@ def automated_retrain():
         print(f"❌ 자동화된 재훈련 중 오류: {str(e)}")
 
 
+# <<< 변경/추가된 부분 시작 >>>
 def main():
-    """메인 실행 함수"""
-    import sys
+    """메인 실행 함수 - argparse로 커맨드 라인 처리"""
+    parser = argparse.ArgumentParser(description="문서형 악성코드 무해화 시스템 v2.2 - CLI")
+    subparsers = parser.add_subparsers(dest="command", help="실행할 명령어")
 
-    if len(sys.argv) > 1:
-        command = sys.argv[1].lower()
+    # 'info' 명령어: 시스템 정보 표시
+    parser_info = subparsers.add_parser("info", help="시스템의 현재 상태와 설정을 확인합니다.")
 
-        if command == "setup":
-            setup_system_optimized()
-        elif command == "test":
-            quick_test()
-        elif command == "info":
-            show_system_info()
-        elif command == "retrain":
-            automated_retrain()
-        else:
-            print("사용법:")
-            print("  python test_api.py setup    - 시스템 초기 설정 (과적합 방지)")
-            print("  python test_api.py test     - 빠른 기능 테스트")
-            print("  python test_api.py info     - 시스템 정보 확인")
-            print("  python test_api.py retrain  - 자동화된 모델 재훈련")
-            print("\nGUI 실행: python main.py (내장 서버 자동 시작)")
+    # 'test' 명령어: 빠른 기능 테스트
+    parser_test = subparsers.add_parser("test", help="로드된 모델로 간단한 예측 테스트를 수행합니다.")
+
+    # 'retrain' 명령어: 자동화된 모델 재훈련
+    parser_retrain = subparsers.add_parser("retrain", help="자동화된 전체 프로세스로 모델을 새로 훈련합니다.")
+
+    # 'setup' 명령어: 전체 시스템 설정
+    parser_setup = subparsers.add_parser("setup", help="API 샘플 수집부터 모델 훈련까지 전체 시스템을 설정합니다.")
+
+    # 'collect' 명령어: 유동적 샘플 수집
+    parser_collect = subparsers.add_parser("collect", help="원하는 개수만큼 악성/정상 샘플을 수집합니다.")
+    parser_collect.add_argument("-m", "--malware", type=int, default=100, help="수집할 악성 샘플 개수 (기본값: 100)")
+    parser_collect.add_argument("-c", "--clean", type=int, default=50, help="수집할 정상 샘플 개수 (기본값: 50)")
+
+    # 사용자가 입력한 인자 파싱
+    args = parser.parse_args()
+
+    # 명령어에 따라 해당 함수 실행
+    if args.command == "info":
+        show_system_info()
+    elif args.command == "test":
+        quick_test()
+    elif args.command == "retrain":
+        automated_retrain()
+    elif args.command == "setup":
+        setup_system_optimized()
+    elif args.command == "collect":
+        run_flexible_collection(args.malware, args.clean)
     else:
-        # 기본 실행: 시스템 상태 확인
+        # 명령어가 없으면 기본 시스템 상태 확인
         test_system()
 
+
+# <<< 변경/추가된 부분 끝 >>>
 
 if __name__ == "__main__":
     main()

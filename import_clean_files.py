@@ -44,10 +44,12 @@ def save_verified_clean_sample_metadata(file_path: str, file_hash: str):
         print(f"  [오류] 메타데이터 저장 실패: {e}")
 
 
+# [수정된 전체 함수] import_clean_files.py
+
 def verify_and_import_clean_samples(candidate_dir: str):
     """
     지정된 디렉토리의 파일들을 VirusTotal로 검증하고,
-    깨끗한 파일만 정상 샘플로 DB에 저장 및 이동시키는 함수
+    '안전'하거나 '미등록'인 경우 정상 샘플로 DB에 저장 및 이동시키는 함수 (수정된 버전)
     """
     checker = VirusTotalChecker()
     if not checker.is_available():
@@ -79,35 +81,48 @@ def verify_and_import_clean_samples(candidate_dir: str):
             # API 응답 대기 (API 제한 준수)
             time.sleep(1)
 
-            # 해시 조회로 결과가 바로 나온 경우
-            if result.get("method") == "hash_lookup" and result.get("verdict") == "안전":
-                # 악성 또는 의심 탐지가 없는지 재확인
+            # --- 여기가 핵심 수정 부분 ---
+            process_as_clean = False
+            verdict = result.get('verdict', '알 수 없음')
+
+            # CASE 1: VirusTotal이 이미 '안전'하다고 알고 있는 경우
+            if result.get("method") == "hash_lookup" and verdict == "안전":
                 if result.get("malicious", 0) == 0 and result.get("suspicious", 0) == 0:
-                    print(f"  [결과] 안전한 파일로 확인되었습니다.")
-
-                    # 파일을 sample/clear 폴더로 이동
-                    dest_path = os.path.join(config.DIRECTORIES['clean_samples'], filename)
-                    shutil.move(file_path, dest_path)
-                    print(f"  [파일] '{dest_path}'로 이동 완료.")
-
-                    # DB에 메타데이터 저장
-                    file_hash = result.get("file_hash")
-                    if file_hash:
-                        save_verified_clean_sample_metadata(dest_path, file_hash)
-
-                    verified_count += 1
+                    print(f"  [결과] VirusTotal에서 '안전'한 파일로 확인되었습니다.")
+                    process_as_clean = True
                 else:
                     print(f"  [결과] 일부 엔진에서 악성/의심으로 탐지되어 추가하지 않습니다.")
+
+            # CASE 2: VirusTotal에 없는 '미등록' 파일인 경우 (신뢰하는 파일이므로 안전으로 간주)
+            elif verdict == "미등록" or verdict == "분석 중":
+                print(f"  [결과] VirusTotal '미등록' 또는 '분석 중' 파일입니다. 신뢰하는 소스이므로 안전한 파일로 처리합니다.")
+                process_as_clean = True
+
+            # 그 외의 경우 (예: '악성', '의심' 등)
             else:
-                verdict = result.get('verdict', '알 수 없음')
-                print(f"  [결과] 안전한 파일로 확인되지 않았거나, 새로운 파일입니다. (상태: {verdict})")
+                print(f"  [결과] 안전한 파일로 확인되지 않았습니다. (상태: {verdict})")
+
+            # 안전하다고 판단된 파일만 후속 처리
+            if process_as_clean:
+                # 파일을 sample/clear 폴더로 이동
+                dest_path = os.path.join(config.DIRECTORIES['clean_samples'], filename)
+                shutil.move(file_path, dest_path)
+                print(f"  [파일] '{dest_path}'로 이동 완료.")
+
+                # DB에 메타데이터 저장
+                file_hash = result.get("file_hash")
+                if not file_hash:  # 해시가 결과에 없으면 직접 계산
+                    with open(dest_path, 'rb') as f:
+                        file_hash = hashlib.sha256(f.read()).hexdigest()
+
+                save_verified_clean_sample_metadata(dest_path, file_hash)
+                verified_count += 1
 
         except Exception as e:
             print(f"  [오류] {filename} 검증 중 오류 발생: {e}")
 
     print(f"\n--- 검증 완료 ---")
     print(f"총 {len(candidate_files)}개 후보 중 {verified_count}개의 안전한 파일을 추가했습니다.")
-
 
 if __name__ == "__main__":
     # 검증할 파일들이 들어있는 폴더 경로
